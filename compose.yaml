@@ -10,6 +10,8 @@ services:
       - ../backend/src:/app
     ports:
       - "8000:8000"
+    tty: true
+    stdin_open: true
     depends_on:
       - db
     networks:
@@ -24,6 +26,8 @@ services:
       - ../frontend/src:/app
     ports:
       - "5173:5173"
+    tty: true
+    stdin_open: true
     networks:
       - default
   
