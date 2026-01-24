@@ -1,8 +1,8 @@
-# ⚡ Guía de Despliegue Local - Sistema Blitz
+#  Guía de Despliegue Local - Sistema Blitz
 
 Esta guía detalla los pasos exactos para clonar, configurar y levantar el entorno de desarrollo del Sistema Blitz (Backend, Frontend e Infraestructura) utilizando Docker.
 
-## 📋 1. Preparación del Espacio de Trabajo
+##  1. Preparación del Espacio de Trabajo
 
 Para que Docker encuentre correctamente los archivos, es **CRÍTICO** respetar la estructura de carpetas.
 
