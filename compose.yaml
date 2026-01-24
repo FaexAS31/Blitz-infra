@@ -1,0 +1,64 @@
+name: sistema-blitz
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: ubuntu_backend
+    volumes:
+      - ../backend/src:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    networks:
+      - default
+  
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: ubuntu_frontend
+    volumes:
+      - ../frontend/src:/app
+    ports:
+      - "5173:5173"
+    networks:
+      - default
+  
+  db:
+    image: postgres:16
+    container_name: blitz_db_container
+    environment:
+      POSTGRES_USER: blitz_db
+      POSTGRES_PASSWORD: Blitz@$135
+      POSTGRES_DB: blitz_database
+    volumes:
+      - postgres_data_v3:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - default
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin_gui
+    environment:
+      PGADMIN_DEFAULT_EMAIL: jefeinge.esteban@gmail.com
+      PGADMIN_DEFAULT_PASSWORD: Blitz@$135
+    ports:
+      - "6060:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - default
+
+volumes:
+  postgres_data_v3:
+  pgadmin_data:
+
+networks:
+  default:
+    driver: bridge
+
