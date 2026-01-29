@@ -76,7 +76,12 @@ cd infra
 docker compose up -d
 
 ```
+si les da error poner en el Dockerfile (frontend y backend):
+RUN apt-get update && apt-get install -y bash
+COPY scripts/install.sh /tmp/install.sh
+RUN chmod +x /tmp/install.sh && bash /tmp/install.sh
 
+lo de mas lo dejas igual
 
 3. Verifica que los 4 contenedores (backend, frontend, db, pgadmin) estén corriendo:
 ```bash
