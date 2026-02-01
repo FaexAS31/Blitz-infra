@@ -6,6 +6,8 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     container_name: ubuntu_backend
+    env_file:
+      - ../backend/.env
     volumes:
       - ../backend/src:/app
     ports:
@@ -24,6 +26,8 @@ services:
     container_name: ubuntu_frontend
     volumes:
       - ../frontend/src:/app
+    env_file:
+      - ../frontend/.env
     ports:
       - "5173:5173"
     tty: true
