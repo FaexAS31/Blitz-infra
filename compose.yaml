@@ -1,72 +1,179 @@
+# =============================================================================
+#  SISTEMA BLITZ — Docker Compose
+#
+#  INSTRUCCIONES DE USO:
+#  Cada servicio tiene DOS bloques de configuracion marcados como
+#  LOCAL y PRODUCCION. Antes de subir o desplegar, asegurate de que
+#  el bloque correcto este descomentado y el otro comentado.
+#
+#  CTRL+F  "TOGGLE" para saltar rapido a cada punto de decision.
+#
+#  FASE ACTUAL: Solo Backend + DB. Frontend desactivado.
+# =============================================================================
+
 name: sistema-blitz
 
 services:
+
+  # ---------------------------------------------------------------------------
+  #  BACKEND  (Django / DRF)
+  # ---------------------------------------------------------------------------
   backend:
+
+    # =========================================
+    # TOGGLE BACKEND — Origen de la imagen
+    # =========================================
+
+    # --- ACTIVO: LOCAL (build desde codigo fuente) ---
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: ubuntu_backend
+
+    # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
+    # image: ghcr.io/jesuslab135/blitz-backend:latest
+
+    container_name: blitz_backend
+
+    # =========================================
+    # TOGGLE BACKEND — Variables de entorno
+    # =========================================
+
+    # --- ACTIVO: LOCAL (archivo .env relativo al repo backend) ---
     env_file:
       - ../backend/.env
+
+    # --- INACTIVO: PRODUCCION (variables inyectadas desde .env en este directorio) ---
+    # environment:
+    #   DB_USER: ${DB_USER}
+    #   DB_PASSWORD: ${DB_PASSWORD}
+    #   DB_NAME: ${DB_NAME}
+    #   SECRET_KEY: ${SECRET_KEY}
+    #   HOST: db
+    #   PORT: "5432"
+
+    # =========================================
+    # TOGGLE BACKEND — Volumenes
+    # =========================================
+
+    # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
     volumes:
       - ../backend/src:/app
+
+    # --- INACTIVO: PRODUCCION (no montar nada, la imagen ya contiene el codigo) ---
+    # (simplemente elimina o comenta el bloque volumes de arriba)
+
     ports:
       - "8000:8000"
     tty: true
     stdin_open: true
     depends_on:
       - db
+    restart: unless-stopped
     networks:
-      - default
-  
-  frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-    container_name: ubuntu_frontend
-    volumes:
-      - ../frontend/src:/app
-    env_file:
-      - ../frontend/.env
-    ports:
-      - "5173:5173"
-    tty: true
-    stdin_open: true
-    networks:
-      - default
-  
+      - blitz-net
+
+  # ---------------------------------------------------------------------------
+  #  FRONTEND  (React / Vite)
+  #
+  #  DESACTIVADO — Fase 1: solo Backend.
+  #  Descomentar cuando el repo frontend este listo para produccion.
+  # ---------------------------------------------------------------------------
+  # frontend:
+  #
+  #   # =========================================
+  #   # TOGGLE FRONTEND — Origen de la imagen
+  #   # =========================================
+  #
+  #   # --- LOCAL (build desde codigo fuente) ---
+  #   # build:
+  #   #   context: ../frontend
+  #   #   dockerfile: Dockerfile
+  #
+  #   # --- PRODUCCION (imagen pre-construida en GHCR) ---
+  #   # image: ghcr.io/faexas31/blitz-frontend:latest
+  #
+  #   container_name: blitz_frontend
+  #
+  #   # =========================================
+  #   # TOGGLE FRONTEND — Variables de entorno
+  #   # =========================================
+  #
+  #   # --- LOCAL ---
+  #   # env_file:
+  #   #   - ../frontend/.env
+  #
+  #   # --- PRODUCCION ---
+  #   # environment:
+  #   #   VITE_API_URL: https://api.tudominio.com
+  #
+  #   # =========================================
+  #   # TOGGLE FRONTEND — Volumenes
+  #   # =========================================
+  #
+  #   # --- LOCAL (monta codigo fuente para hot-reload) ---
+  #   # volumes:
+  #   #   - ../frontend/src:/app
+  #
+  #   ports:
+  #     - "5173:5173"
+  #   tty: true
+  #   stdin_open: true
+  #   restart: unless-stopped
+  #   networks:
+  #     - blitz-net
+
+  # ---------------------------------------------------------------------------
+  #  BASE DE DATOS
+  # ---------------------------------------------------------------------------
   db:
     image: postgres:16
-    container_name: blitz_db_container
+    container_name: blitz_db
+
+    # =========================================
+    # TOGGLE DB — Credenciales
+    # =========================================
+
+    # --- ACTIVO: LOCAL (valores hardcodeados para desarrollo) ---
     environment:
       POSTGRES_USER: blitz_db
-      POSTGRES_PASSWORD: Blitz@$135
+      POSTGRES_PASSWORD: Blitz@$$135
       POSTGRES_DB: blitz_database
+
+    # --- INACTIVO: PRODUCCION (valores desde .env en este directorio) ---
+    # environment:
+    #   POSTGRES_USER: ${DB_USER}
+    #   POSTGRES_PASSWORD: ${DB_PASSWORD}
+    #   POSTGRES_DB: ${DB_NAME}
+
     volumes:
-      - postgres_data_v3:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    restart: unless-stopped
     networks:
-      - default
+      - blitz-net
 
+  # ---------------------------------------------------------------------------
+  #  PGADMIN  (herramienta de administracion — desactivar en produccion real)
+  # ---------------------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4
-    container_name: pgadmin_gui
+    container_name: blitz_pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: jefeinge.esteban@gmail.com
-      PGADMIN_DEFAULT_PASSWORD: Blitz@$135
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@blitz.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
     ports:
       - "6060:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
     networks:
-      - default
+      - blitz-net
 
 volumes:
-  postgres_data_v3:
+  postgres_data:
   pgadmin_data:
 
 networks:
-  default:
+  blitz-net:
     driver: bridge
-
