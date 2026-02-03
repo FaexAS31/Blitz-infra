@@ -30,7 +30,7 @@ services:
       dockerfile: Dockerfile
 
     # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
-    # image: ghcr.io/jesuslab135/blitz-backend:latest
+    image: ghcr.io/jesuslab135/blitz-backend:latest
 
     container_name: blitz_backend
 
@@ -39,25 +39,25 @@ services:
     # =========================================
 
     # --- ACTIVO: LOCAL (archivo .env relativo al repo backend) ---
-    env_file:
-      - ../backend/.env
+    #env_file:
+    #  - ../backend/.env
 
     # --- INACTIVO: PRODUCCION (variables inyectadas desde .env en este directorio) ---
-    # environment:
-    #   DB_USER: ${DB_USER}
-    #   DB_PASSWORD: ${DB_PASSWORD}
-    #   DB_NAME: ${DB_NAME}
-    #   SECRET_KEY: ${SECRET_KEY}
-    #   HOST: db
-    #   PORT: "5432"
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      SECRET_KEY: ${SECRET_KEY}
+      HOST: db
+      PORT: "5432"
 
     # =========================================
     # TOGGLE BACKEND — Volumenes
     # =========================================
 
     # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
-    volumes:
-      - ../backend/src:/app
+    #volumes:
+    #  - ../backend/src:/app
 
     # --- INACTIVO: PRODUCCION (no montar nada, la imagen ya contiene el codigo) ---
     # (simplemente elimina o comenta el bloque volumes de arriba)
@@ -134,19 +134,19 @@ services:
     # =========================================
 
     # --- ACTIVO: LOCAL (valores hardcodeados para desarrollo) ---
-    environment:
-      POSTGRES_USER: blitz_db
-      POSTGRES_PASSWORD: Blitz@$$135
-      POSTGRES_DB: blitz_database
+    #environment:
+    #  POSTGRES_USER: blitz_db
+    #  POSTGRES_PASSWORD: Blitz@$$135
+    #  POSTGRES_DB: blitz_database
 
     # --- INACTIVO: PRODUCCION (valores desde .env en este directorio) ---
-    # environment:
-    #   POSTGRES_USER: ${DB_USER}
-    #   POSTGRES_PASSWORD: ${DB_PASSWORD}
-    #   POSTGRES_DB: ${DB_NAME}
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
 
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+    #volumes:
+    #  - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     restart: unless-stopped
@@ -164,8 +164,8 @@ services:
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
     ports:
       - "6060:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
+    #volumes:
+    #  - pgadmin_data:/var/lib/pgadmin
     restart: unless-stopped
     networks:
       - blitz-net
