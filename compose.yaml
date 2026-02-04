@@ -1,18 +1,66 @@
+# =============================================================================
+#  SISTEMA BLITZ — Docker Compose
+#
+#  INSTRUCCIONES DE USO:
+#  Cada servicio tiene DOS bloques de configuracion marcados como
+#  LOCAL y PRODUCCION. Antes de subir o desplegar, asegurate de que
+#  el bloque correcto este descomentado y el otro comentado.
+#
+#  CTRL+F  "TOGGLE" para saltar rapido a cada punto de decision.
+# =============================================================================
+
 name: sistema-blitz
 
 services:
+
   # ---------------------------------------------------------------------------
-  #  BACKEND (Django + Daphne ASGI)
+  #  BACKEND  (Django / DRF)
   # ---------------------------------------------------------------------------
   backend:
+
+    # =========================================
+    # TOGGLE BACKEND — Origen de la imagen
+    # =========================================
+
+    # --- ACTIVO: LOCAL (build desde codigo fuente) ---
     build:
       context: ../backend
       dockerfile: Dockerfile
+
+    # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
+    # image: ghcr.io/jesuslab135/blitz-backend:latest
+
     container_name: blitz_backend
+
+    # =========================================
+    # TOGGLE BACKEND — Variables de entorno
+    # =========================================
+
+    # --- ACTIVO: LOCAL (archivo .env relativo al repo backend) ---
     env_file:
       - ../backend/.env
+
+    # --- INACTIVO: PRODUCCION (variables inyectadas desde .env en este directorio) ---
+    # environment:
+    #   DB_USER: ${DB_USER}
+    #   DB_PASSWORD: ${DB_PASSWORD}
+    #   DB_NAME: ${DB_NAME}
+    #   SECRET_KEY: ${SECRET_KEY}
+    #   HOST: db
+    #   PORT: "5432"
+    #   REDIS_HOST: redis
+
+    # =========================================
+    # TOGGLE BACKEND — Volumenes
+    # =========================================
+
+    # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
     volumes:
       - ../backend/src:/app
+
+    # --- INACTIVO: PRODUCCION (no montar nada, la imagen ya contiene el codigo) ---
+    # (simplemente elimina o comenta el bloque volumes de arriba)
+
     ports:
       - "8000:8000"
     tty: true
@@ -20,41 +68,86 @@ services:
     depends_on:
       - db
       - redis
+    restart: unless-stopped
     networks:
       - blitz-net
 
   # ---------------------------------------------------------------------------
-  #  FRONTEND (React + Vite)
+  #  FRONTEND (React / Vite)
   # ---------------------------------------------------------------------------
   frontend:
+  
+    # =========================================
+    # TOGGLE FRONTEND — Origen de la imagen
+    # =========================================
+  
+    # --- ACTIVO: LOCAL (build desde codigo fuente) ---
     build:
       context: ../frontend
       dockerfile: Dockerfile
+  
+    # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
+    # image: ghcr.io/faexas31/blitz-frontend:latest
+  
     container_name: blitz_frontend
-    volumes:
-      - ../frontend:/app
-      - /app/node_modules
+  
+    # =========================================
+    # TOGGLE FRONTEND — Variables de entorno
+    # =========================================
+  
+    # --- ACTIVO: LOCAL ---
     env_file:
       - ../frontend/.env
+  
+    # --- INACTIVO: PRODUCCION ---
+    # environment:
+    #   VITE_API_URL: https://api.tudominio.com
+  
+    # =========================================
+    # TOGGLE FRONTEND — Volumenes
+    # =========================================
+  
+    # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
+    # Ajusta la ruta ../frontend/src según donde esté tu código fuente real dentro de la carpeta frontend
+    volumes:
+      - ../frontend/src:/app/src
+  
+    # --- INACTIVO: PRODUCCION ---
+    # (Comentar volumes en prod)
+
     ports:
       - "5173:5173"
     tty: true
     stdin_open: true
+    restart: unless-stopped
     depends_on:
       - backend
     networks:
       - blitz-net
 
   # ---------------------------------------------------------------------------
-  #  DATABASE (PostgreSQL)
+  #  BASE DE DATOS
   # ---------------------------------------------------------------------------
   db:
     image: postgres:16
     container_name: blitz_db
+
+    # =========================================
+    # TOGGLE DB — Credenciales
+    # =========================================
+
+    # --- ACTIVO: LOCAL (valores hardcodeados para desarrollo) ---
     environment:
       POSTGRES_USER: blitz_db
       POSTGRES_PASSWORD: Blitz@$$135
       POSTGRES_DB: blitz_database
+
+    # --- INACTIVO: PRODUCCION (valores desde .env en este directorio) ---
+    # environment:
+    #   POSTGRES_USER: ${DB_USER}
+    #   POSTGRES_PASSWORD: ${DB_PASSWORD}
+    #   POSTGRES_DB: ${DB_NAME}
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -62,9 +155,9 @@ services:
     restart: unless-stopped
     networks:
       - blitz-net
-
+    
   # ---------------------------------------------------------------------------
-  #  REDIS (Django Channels WebSocket)
+  #  REDIS (Cache & Django Channels WebSocket)
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
@@ -80,16 +173,17 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  #  PGADMIN (Database GUI)
+  #  PGADMIN  (herramienta de administracion — desactivar en produccion real)
   # ---------------------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4
     container_name: blitz_pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@blitz.local
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@blitz.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
     ports:
       - "6060:80"
     volumes:
@@ -98,6 +192,9 @@ services:
     networks:
       - blitz-net
 
+# =========================================
+# VOLUMENES Y REDES GLOBALES
+# =========================================
 volumes:
   postgres_data:
   pgadmin_data:
