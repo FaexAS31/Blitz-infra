@@ -23,12 +23,12 @@ services:
     # =========================================
 
     # --- ACTIVO: LOCAL (build desde codigo fuente) ---
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
+    # build:
+    #   context: ../backend
+    #   dockerfile: Dockerfile
 
     # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
-    # image: ghcr.io/jesuslab135/blitz-backend:latest
+    image: ghcr.io/jesuslab135/blitz-backend:latest
 
     container_name: blitz_backend
 
@@ -37,26 +37,26 @@ services:
     # =========================================
 
     # --- ACTIVO: LOCAL (archivo .env relativo al repo backend) ---
-    env_file:
-      - ../backend/.env
+    # env_file:
+    #   - ../backend/.env
 
     # --- INACTIVO: PRODUCCION (variables inyectadas desde .env en este directorio) ---
-    # environment:
-    #   DB_USER: ${DB_USER}
-    #   DB_PASSWORD: ${DB_PASSWORD}
-    #   DB_NAME: ${DB_NAME}
-    #   SECRET_KEY: ${SECRET_KEY}
-    #   HOST: db
-    #   PORT: "5432"
-    #   REDIS_HOST: redis
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      SECRET_KEY: ${SECRET_KEY}
+      HOST: db
+      PORT: "5432"
+      REDIS_HOST: redis
 
     # =========================================
     # TOGGLE BACKEND — Volumenes
     # =========================================
 
     # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
-    volumes:
-      - ../backend/src:/app
+    # volumes:
+    #   - ../backend/src:/app
 
     # --- INACTIVO: PRODUCCION (no montar nada, la imagen ya contiene el codigo) ---
     # (simplemente elimina o comenta el bloque volumes de arriba)
@@ -82,9 +82,9 @@ services:
     # =========================================
   
     # --- ACTIVO: LOCAL (build desde codigo fuente) ---
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
+    # build:
+    #   context: ../frontend
+    #   dockerfile: Dockerfile
   
     # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
     # image: ghcr.io/faexas31/blitz-frontend:latest
@@ -96,12 +96,12 @@ services:
     # =========================================
   
     # --- ACTIVO: LOCAL ---
-    env_file:
-      - ../frontend/.env
+    # env_file:
+    #   - ../frontend/.env
   
     # --- INACTIVO: PRODUCCION ---
-    # environment:
-    #   VITE_API_URL: https://api.tudominio.com
+    environment:
+      VITE_API_URL: https://api.tudominio.com
   
     # =========================================
     # TOGGLE FRONTEND — Volumenes
@@ -109,8 +109,8 @@ services:
   
     # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
     # Ajusta la ruta ../frontend/src según donde esté tu código fuente real dentro de la carpeta frontend
-    volumes:
-      - ../frontend/src:/app/src
+    # volumes:
+    #   - ../frontend/src:/app/src
   
     # --- INACTIVO: PRODUCCION ---
     # (Comentar volumes en prod)
@@ -137,16 +137,16 @@ services:
     # =========================================
 
     # --- ACTIVO: LOCAL (valores hardcodeados para desarrollo) ---
-    environment:
-      POSTGRES_USER: blitz_db
-      POSTGRES_PASSWORD: Blitz@$$135
-      POSTGRES_DB: blitz_database
+    # environment:
+    #   POSTGRES_USER: blitz_db
+    #   POSTGRES_PASSWORD: Blitz@$135
+    #   POSTGRES_DB: blitz_database
 
     # --- INACTIVO: PRODUCCION (valores desde .env en este directorio) ---
-    # environment:
-    #   POSTGRES_USER: ${DB_USER}
-    #   POSTGRES_PASSWORD: ${DB_PASSWORD}
-    #   POSTGRES_DB: ${DB_NAME}
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
