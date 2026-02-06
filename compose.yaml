@@ -49,6 +49,10 @@ services:
       HOST: db
       PORT: "5432"
       REDIS_HOST: redis
+      FIREBASE_CREDENTIALS_PATH: ${FIREBASE_CREDENTIALS_PATH}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
 
     # =========================================
     # TOGGLE BACKEND — Volumenes
