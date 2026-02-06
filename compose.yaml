@@ -91,7 +91,7 @@ services:
     #   dockerfile: Dockerfile
   
     # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
-    # image: ghcr.io/faexas31/blitz-frontend:latest
+    image: ghcr.io/jesuslab135/blitz-frontend:latest
   
     container_name: blitz_frontend
   
