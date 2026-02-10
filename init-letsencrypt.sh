@@ -12,7 +12,7 @@ set -e
 
 DOMAIN="jesuslab135.com"
 EMAIL="lidering.esteban@gmail.com"  # <-- CAMBIA por tu email real
-DEPLOY_PATH="/root/app"
+DEPLOY_PATH="/root/app/infra"
 
 cd "$DEPLOY_PATH"
 
@@ -43,7 +43,7 @@ curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://$DOMAIN || echo "AD
 
 # 5. Obtener certificado SSL
 echo "=== 5. Obteniendo certificado SSL de Let's Encrypt ==="
-docker compose run --rm certbot certonly \
+docker compose --profile ssl run --rm certbot certonly \
     --webroot \
     --webroot-path=/var/www/certbot \
     --email "$EMAIL" \

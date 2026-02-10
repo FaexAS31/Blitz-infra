@@ -80,6 +80,12 @@ services:
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
 
+    # Montar credenciales Firebase (gitignored, no esta en la imagen GHCR).
+    # El JSON se coloca manualmente en el VPS: ../backend/squapup-...json
+    # Se monta en /app/core/ donde Django lo busca (authentication.py + settings.py)
+    volumes:
+      - ../backend/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json:/app/core/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json:ro
+
     # Puerto interno siempre 8000 (Daphne CMD). Puerto externo parametrizado.
     ports:
       - "${BACKEND_PORT:-8000}:8000"
