@@ -1,122 +1,115 @@
 # =============================================================================
-#  SISTEMA BLITZ — Docker Compose
+#  SISTEMA BLITZ — Docker Compose (Multi-Environment)
 #
-#  INSTRUCCIONES DE USO:
-#  Cada servicio tiene DOS bloques de configuracion marcados como
-#  LOCAL y PRODUCCION. Antes de subir o desplegar, asegurate de que
-#  el bloque correcto este descomentado y el otro comentado.
+#  ARCHIVO UNICO para Produccion y Staging.
+#  La diferencia entre entornos se controla via el archivo .env
+#  que vive en cada directorio de despliegue:
 #
-#  CTRL+F  "TOGGLE" para saltar rapido a cada punto de decision.
+#    /root/app/.env       → Producción (COMPOSE_PROJECT_NAME=blitz-prod)
+#    /root/app-dev/.env   → Staging    (COMPOSE_PROJECT_NAME=blitz-dev)
+#
+#  Docker Compose auto-prefija contenedores, volumenes y redes con
+#  COMPOSE_PROJECT_NAME, evitando colisiones entre entornos.
+#
+#  IMPORTANTE: NO usar container_name: en ningun servicio.
 # =============================================================================
-
-name: sistema-blitz
 
 services:
 
   # ---------------------------------------------------------------------------
-  #  BACKEND  (Django / DRF)
+  #  NGINX — Reverse Proxy
+  #  En produccion: sirve HTTPS con certificados Let's Encrypt
+  #  En staging:    sirve HTTP en puerto alternativo (ver .env)
+  #  Cada entorno tiene su propio nginx/default.conf en su directorio
   # ---------------------------------------------------------------------------
-  backend:
-
-    # =========================================
-    # TOGGLE BACKEND — Origen de la imagen
-    # =========================================
-
-    # --- ACTIVO: LOCAL (build desde codigo fuente) ---
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
-
-    # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
-    # image: ghcr.io/jesuslab135/blitz-backend:latest
-
-    container_name: blitz_backend
-
-    # =========================================
-    # TOGGLE BACKEND — Variables de entorno
-    # =========================================
-
-    # --- ACTIVO: LOCAL (archivo .env relativo al repo backend) ---
-    env_file:
-      - ../backend/.env
-
-    # --- INACTIVO: PRODUCCION (variables inyectadas desde .env en este directorio) ---
-    # environment:
-    #   DB_USER: ${DB_USER}
-    #   DB_PASSWORD: ${DB_PASSWORD}
-    #   DB_NAME: ${DB_NAME}
-    #   SECRET_KEY: ${SECRET_KEY}
-    #   HOST: db
-    #   PORT: "5432"
-    #   REDIS_HOST: redis
-
-    # =========================================
-    # TOGGLE BACKEND — Volumenes
-    # =========================================
-
-    # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
-    volumes:
-      - ../backend/src:/app
-
-    # --- INACTIVO: PRODUCCION (no montar nada, la imagen ya contiene el codigo) ---
-    # (simplemente elimina o comenta el bloque volumes de arriba)
-
+  nginx:
+    image: nginx:alpine
     ports:
-      - "8000:8000"
-    tty: true
-    stdin_open: true
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+      - frontend_dist:/usr/share/nginx/html:ro
     depends_on:
-      - db
-      - redis
+      - backend
+      - frontend
     restart: unless-stopped
     networks:
       - blitz-net
 
   # ---------------------------------------------------------------------------
-  #  FRONTEND (React / Vite)
+  #  CERTBOT — Renovacion automatica SSL (solo Produccion)
+  #  Se activa con COMPOSE_PROFILES=ssl en el .env de produccion
+  # ---------------------------------------------------------------------------
+  certbot:
+    image: certbot/certbot
+    profiles: ["ssl"]
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    restart: unless-stopped
+    networks:
+      - blitz-net
+
+  # ---------------------------------------------------------------------------
+  #  BACKEND (Django / Daphne ASGI)
+  # ---------------------------------------------------------------------------
+  backend:
+
+    # --- LOCAL: build desde codigo fuente ---
+    # build:
+    #   context: ../backend
+    #   dockerfile: Dockerfile
+
+    # --- DEPLOY: imagen pre-construida en GHCR ---
+    image: ghcr.io/jesuslab135/blitz-backend:${IMAGE_TAG:-latest}
+
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      SECRET_KEY: ${SECRET_KEY}
+      HOST: db
+      PORT: "5432"
+      REDIS_HOST: redis
+      FIREBASE_CREDENTIALS_PATH: ${FIREBASE_CREDENTIALS_PATH}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+
+    # Puerto interno siempre 8000 (Daphne CMD). Puerto externo parametrizado.
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    tty: true
+    stdin_open: true
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - blitz-net
+
+  # ---------------------------------------------------------------------------
+  #  FRONTEND (React + Vite, servido por Nginx interno)
   # ---------------------------------------------------------------------------
   frontend:
-  
-    # =========================================
-    # TOGGLE FRONTEND — Origen de la imagen
-    # =========================================
-  
-    # --- ACTIVO: LOCAL (build desde codigo fuente) ---
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-  
-    # --- INACTIVO: PRODUCCION (imagen pre-construida en GHCR) ---
-    # image: ghcr.io/faexas31/blitz-frontend:latest
-  
-    container_name: blitz_frontend
-  
-    # =========================================
-    # TOGGLE FRONTEND — Variables de entorno
-    # =========================================
-  
-    # --- ACTIVO: LOCAL ---
-    env_file:
-      - ../frontend/.env
-  
-    # --- INACTIVO: PRODUCCION ---
-    # environment:
-    #   VITE_API_URL: https://api.tudominio.com
-  
-    # =========================================
-    # TOGGLE FRONTEND — Volumenes
-    # =========================================
-  
-    # --- ACTIVO: LOCAL (monta codigo fuente para hot-reload) ---
-    # Ajusta la ruta ../frontend/src según donde esté tu código fuente real dentro de la carpeta frontend
-    volumes:
-      - ../frontend/src:/app/src
-  
-    # --- INACTIVO: PRODUCCION ---
-    # (Comentar volumes en prod)
 
-    ports:
-      - "5173:5173"
+    # --- LOCAL: build desde codigo fuente ---
+    # build:
+    #   context: ../frontend
+    #   dockerfile: Dockerfile
+
+    # --- DEPLOY: imagen pre-construida en GHCR ---
+    image: ghcr.io/jesuslab135/blitz-frontend:${IMAGE_TAG:-latest}
+
+    # Comparte dist/ con nginx via volumen
+    volumes:
+      - frontend_dist:/usr/share/nginx/html
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -126,44 +119,34 @@ services:
       - blitz-net
 
   # ---------------------------------------------------------------------------
-  #  BASE DE DATOS
+  #  BASE DE DATOS — PostgreSQL 16
   # ---------------------------------------------------------------------------
   db:
     image: postgres:16
-    container_name: blitz_db
-
-    # =========================================
-    # TOGGLE DB — Credenciales
-    # =========================================
-
-    # --- ACTIVO: LOCAL (valores hardcodeados para desarrollo) ---
     environment:
-      POSTGRES_USER: blitz_db
-      POSTGRES_PASSWORD: Blitz@$$135
-      POSTGRES_DB: blitz_database
-
-    # --- INACTIVO: PRODUCCION (valores desde .env en este directorio) ---
-    # environment:
-    #   POSTGRES_USER: ${DB_USER}
-    #   POSTGRES_PASSWORD: ${DB_PASSWORD}
-    #   POSTGRES_DB: ${DB_NAME}
-
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
     restart: unless-stopped
     networks:
       - blitz-net
-    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ---------------------------------------------------------------------------
-  #  REDIS (Cache & Django Channels WebSocket)
+  #  REDIS — Cache + Django Channels WebSocket layer
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    container_name: blitz_redis
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     networks:
@@ -176,29 +159,36 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  #  PGADMIN  (herramienta de administracion — desactivar en produccion real)
+  #  PGADMIN — Administracion de BD (desactivar en produccion real)
   # ---------------------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4
-    container_name: blitz_pgadmin
+    profiles: ["tools"]
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@blitz.local}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
     ports:
-      - "6060:80"
+      - "${PGADMIN_PORT:-5050}:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     restart: unless-stopped
     networks:
       - blitz-net
 
-# =========================================
-# VOLUMENES Y REDES GLOBALES
-# =========================================
+# =============================================================================
+# VOLUMENES Y REDES
+# Docker Compose los prefija automaticamente con COMPOSE_PROJECT_NAME.
+# Produccion: blitz-prod_postgres_data, blitz-prod_blitz-net, etc.
+# Staging:    blitz-dev_postgres_data,  blitz-dev_blitz-net,  etc.
+# → Aislamiento total sin configuracion adicional.
+# =============================================================================
 volumes:
   postgres_data:
-  pgadmin_data:
   redis_data:
+  frontend_dist:
+  certbot_conf:
+  certbot_www:
+  pgadmin_data:
 
 networks:
   blitz-net:
