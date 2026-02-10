@@ -7,38 +7,38 @@
 ## Tabla de Contenidos
 
 1. [Que vamos a lograr](#1-que-vamos-a-lograr)
-2. [Como funciona todo (la teoria)](#2-como-funciona-todo-la-teoria)
-3. [Que archivos se cambiaron y por que](#3-que-archivos-se-cambiaron-y-por-que)
+2. [Como funciona (la teoria simple)](#2-como-funciona-la-teoria-simple)
+3. [Que archivos se cambiaron](#3-que-archivos-se-cambiaron)
 4. [PASO 1: Configurar GitHub Environments](#4-paso-1-configurar-github-environments)
-5. [PASO 2: Configurar los Secrets en GitHub](#5-paso-2-configurar-los-secrets-en-github)
-6. [PASO 3: Preparar el VPS (servidor)](#6-paso-3-preparar-el-vps-servidor)
-7. [PASO 4: Primer deploy manual (verificacion)](#7-paso-4-primer-deploy-manual-verificacion)
+5. [PASO 2: Configurar Secrets en GitHub](#5-paso-2-configurar-secrets-en-github)
+6. [PASO 3: Preparar el VPS](#6-paso-3-preparar-el-vps)
+7. [PASO 4: Primer deploy manual](#7-paso-4-primer-deploy-manual)
 8. [PASO 5: Probar el flujo automatico](#8-paso-5-probar-el-flujo-automatico)
 9. [Como acceder a cada entorno](#9-como-acceder-a-cada-entorno)
-10. [Diagrama completo del flujo](#10-diagrama-completo-del-flujo)
-11. [Troubleshooting (cuando algo falla)](#11-troubleshooting-cuando-algo-falla)
-12. [Referencia rapida de comandos](#12-referencia-rapida-de-comandos)
+10. [Diagrama del flujo completo](#10-diagrama-del-flujo-completo)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Referencia de comandos](#12-referencia-de-comandos)
 13. [Checklist final](#13-checklist-final)
 
 ---
 
 ## 1. Que vamos a lograr
 
-Queremos que en **un solo servidor VPS** corran **dos versiones** de la app al mismo tiempo:
+Dos versiones de la app corriendo al mismo tiempo en **un solo servidor VPS**:
 
 ```
 PRODUCCION (lo que ven los usuarios reales)
    URL:    https://jesuslab135.com
    Rama:   main
-   Ruta:   /root/app
+   Ruta:   /root/app/infra/        ← docker compose corre desde aqui
 
-STAGING (donde probamos antes de subir a produccion)
+STAGING (donde pruebas antes de subir a produccion)
    URL:    http://jesuslab135.com:8080
    Rama:   development
-   Ruta:   /root/app-dev
+   Ruta:   /root/app-dev/infra/    ← docker compose corre desde aqui
 ```
 
-El flujo automatico es:
+El flujo automatico:
 
 ```
 Tu haces push a "development"
@@ -47,30 +47,30 @@ Tu haces push a "development"
 GitHub Actions detecta la rama
         |
         v
-Construye la imagen Docker y la sube a GHCR
+Construye imagen Docker → sube a GHCR con tag :dev
         |
         v
 Se conecta al VPS por SSH
         |
         v
-Descarga la imagen nueva en /root/app-dev
+Descarga imagen nueva en /root/app-dev/infra/
         |
         v
-Reinicia los contenedores de staging
+Reinicia contenedores de staging
         |
         v
-Staging actualizado! Prueba en http://jesuslab135.com:8080
+Listo! Prueba en http://jesuslab135.com:8080
 ```
 
-Lo mismo pasa con `main`, pero despliega en `/root/app` (produccion).
+Lo mismo pasa con `main`, pero despliega en `/root/app/infra/` con tag `:latest`.
 
 ---
 
-## 2. Como funciona todo (la teoria)
+## 2. Como funciona (la teoria simple)
 
-### El problema original
+### El problema: dos apps que chocan
 
-Si intentas correr dos copias de la misma app con Docker, todo choca:
+Si corres dos copias de la misma app con Docker, todo choca:
 
 | Recurso | Produccion quiere | Staging quiere | Resultado |
 |---------|-------------------|----------------|-----------|
@@ -80,25 +80,21 @@ Si intentas correr dos copias de la misma app con Docker, todo choca:
 
 ### La solucion: COMPOSE_PROJECT_NAME
 
-Docker Compose tiene una variable magica llamada `COMPOSE_PROJECT_NAME`. Cuando la defines, Docker le pone ese nombre como **prefijo** a todo:
+Docker Compose tiene una variable que controla TODO el namespacing. Cuando la defines, Docker le pone ese nombre como **prefijo** a cada recurso:
 
 ```
-COMPOSE_PROJECT_NAME=blitz-prod
-  → Contenedores:  blitz-prod-backend-1, blitz-prod-db-1, ...
-  → Volumenes:     blitz-prod_postgres_data
-  → Redes:         blitz-prod_blitz-net
-
-COMPOSE_PROJECT_NAME=blitz-dev
-  → Contenedores:  blitz-dev-backend-1, blitz-dev-db-1, ...
-  → Volumenes:     blitz-dev_postgres_data   ← BASE DE DATOS SEPARADA!
-  → Redes:         blitz-dev_blitz-net        ← RED SEPARADA!
+COMPOSE_PROJECT_NAME=blitz-prod        COMPOSE_PROJECT_NAME=blitz-dev
+├── blitz-prod-backend-1               ├── blitz-dev-backend-1
+├── blitz-prod-db-1                    ├── blitz-dev-db-1
+├── blitz-prod_postgres_data           ├── blitz-dev_postgres_data  ← BD SEPARADA
+└── blitz-prod_blitz-net               └── blitz-dev_blitz-net      ← RED SEPARADA
 ```
 
-Eso significa: **un solo archivo `compose.yaml`** sirve para ambos entornos. La diferencia la hace el archivo `.env` que esta en cada carpeta.
+Un solo `compose.yaml` para ambos entornos. La diferencia la hace el `.env` de cada directorio.
 
 ### Los puertos
 
-Ademas del prefijo, cada entorno usa puertos diferentes:
+Cada entorno usa puertos diferentes para no chocar:
 
 ```
 Produccion:                     Staging:
@@ -107,358 +103,292 @@ Produccion:                     Staging:
   PGAdmin:  5050                  PGAdmin:  6060
 ```
 
-Estos puertos se configuran en el `.env` de cada entorno.
-
 ### Las imagenes Docker
-
-Las imagenes se etiquetan (tagean) diferente segun la rama:
 
 ```
 push a main        → ghcr.io/jesuslab135/blitz-backend:latest
 push a development → ghcr.io/jesuslab135/blitz-backend:dev
 ```
 
-El `compose.yaml` usa `${IMAGE_TAG}` para saber cual imagen descargar. Produccion tiene `IMAGE_TAG=latest` en su `.env`, staging tiene `IMAGE_TAG=dev`.
+### Ruta interna del contenedor vs ruta del VPS
 
-### GitHub Environments
-
-GitHub tiene una feature llamada **Environments**. Nos permite guardar secretos diferentes para cada entorno. Ejemplo:
+Esto es importante y puede confundir. Son dos cosas diferentes:
 
 ```
-Repositorio (secretos compartidos):
-  VPS_HOST     = 85.215.x.x
-  VPS_USER     = root
-  VPS_SSH_KEY  = (tu clave SSH privada)
+RUTA EN EL VPS (donde estan tus archivos en el servidor):
+  /root/app/          ← Produccion
+  /root/app-dev/      ← Staging
 
-Environment "production" (secretos solo para prod):
-  VPS_DEPLOY_PATH = /root/app
+RUTA DENTRO DEL CONTENEDOR (donde vive el codigo de Django):
+  /app/core/          ← Igual en AMBOS contenedores
 
-Environment "staging" (secretos solo para staging):
-  VPS_DEPLOY_PATH = /root/app-dev
+No hay conflicto: son contenedores separados.
+Es como dos departamentos en edificios diferentes.
+Ambos pueden tener una "sala" sin que choquen.
 ```
 
-El workflow detecta la rama, elige el environment correcto, y automaticamente tiene acceso al `VPS_DEPLOY_PATH` que corresponde.
+### Archivos secretos (Firebase JSON)
+
+El archivo `squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json` esta en `.gitignore`, asi que:
+
+- **NO esta en el repositorio de GitHub**
+- **NO esta dentro de las imagenes Docker** que construye GitHub Actions
+- Se coloca **manualmente** en el VPS
+- Se conecta al contenedor via **volume mount** en el compose.yaml
+
+```
+VPS (host):                                  Contenedor Docker:
+/root/app/backend/squapup-...json    →→→     /app/core/squapup-...json
+                                   volume
+                                   mount
+```
 
 ---
 
-## 3. Que archivos se cambiaron y por que
+## 3. Que archivos se cambiaron
 
 ### Archivos modificados
 
 | Archivo | Que se hizo | Por que |
 |---------|-------------|---------|
-| `infra/compose.yaml` | Reescrito completo | Eliminamos `container_name:` de todos los servicios, parametrizamos puertos e image tags con variables `${}`, agregamos healthchecks, y usamos `profiles` para certbot y pgadmin |
-| `frontend/Dockerfile` (linea 32) | Fix: `/app/dist` → `/app-dev/dist` | BUG: El WORKDIR es `/app-dev`, pero el COPY del stage 2 buscaba en `/app/dist` (que no existe). El build generaba una imagen vacia |
-| `backend/.github/workflows/deploy.yml` | Reescrito | Ahora detecta la rama (`main` o `development`), tagea la imagen correspondiente, y usa GitHub Environments para deployar al directorio correcto |
-| `frontend/.github/workflows/deploy.yml` | Reescrito | Mismo patron que el backend |
+| `backend/Dockerfile` | `/app-dev` → `/app` en todas las rutas | Estandarizar ruta interna del contenedor para que coincida con la imagen de produccion actual |
+| `backend/scripts/entrypoint.sh` | `cd /app-dev/core` → `cd /app/core` | Misma razon |
+| `frontend/Dockerfile` | `/app-dev` → `/app` + entrypoint para refrescar volumen | Estandarizar ruta + fix: named volumes no se actualizan solos en deploys |
+| `infra/compose.yaml` | Reescrito completo | Parametrizado para multi-entorno + volume mount de Firebase credentials |
+| `backend/.github/workflows/deploy.yml` | Reescrito | Detecta rama, usa GitHub Environments |
+| `frontend/.github/workflows/deploy.yml` | Reescrito | Mismo patron que backend |
 
 ### Archivos nuevos
 
 | Archivo | Que es |
 |---------|--------|
-| `infra/.env.production` | Template del `.env` para produccion. Se copia a `/root/app/.env` en el VPS |
-| `infra/.env.staging` | Template del `.env` para staging. Se copia a `/root/app-dev/.env` en el VPS |
-| `infra/nginx/staging.conf` | Configuracion de Nginx para staging (HTTP simple, sin SSL) |
+| `infra/.env.production` | Template del `.env` para produccion |
+| `infra/.env.staging` | Template del `.env` para staging |
+| `infra/nginx/staging.conf` | Nginx HTTP-only para staging |
 | `infra/GUIA-DEPLOY-MULTI-ENTORNO.md` | Esta guia |
 
-### Bug adicional detectado (no corregido automaticamente)
+### Bugs que se corrigieron
 
-El `compose.yaml` original tenia `ports: "8001:8001"` para el backend, pero Daphne (el servidor) escucha en el puerto **8000** dentro del contenedor. Eso significa que el mapeo `8001:8001` no conectaba con nada. El compose nuevo lo corrige: `"${BACKEND_PORT:-8000}:8000"` — el puerto externo es configurable, pero el interno siempre es 8000.
+| Bug | Donde | Que pasaba |
+|-----|-------|------------|
+| Port mismatch | compose.yaml | Daphne escucha en 8000, pero el compose mapeaba 8001:8001 |
+| COPY path roto | frontend/Dockerfile | WORKDIR era /app-dev pero COPY buscaba en /app/dist |
+| Firebase no cargaba | compose.yaml | El JSON de Firebase no tenia volume mount, Django no podia leerlo |
+| Frontend no se actualizaba | frontend/Dockerfile | El named volume `frontend_dist` solo se llena la primera vez; deploys posteriores servian archivos viejos |
 
 ---
 
 ## 4. PASO 1: Configurar GitHub Environments
 
-Esto se hace en **ambos repositorios** (backend y frontend) porque cada uno tiene su propio workflow.
+> Hacer esto en **AMBOS repos** (backend y frontend).
 
-### 4.1 Ir a Settings del repositorio de Backend
+### 4.1 Abrir Settings del repositorio
 
-1. Abre tu navegador
-2. Ve a `https://github.com/jesuslab135/blitz-backend` (o como se llame tu repo)
-3. Haz clic en la pestana **Settings** (arriba a la derecha, al lado de "Insights")
+1. Ve a `https://github.com/TU-USUARIO/blitz-backend`
+2. Clic en **Settings** (pestana arriba a la derecha)
+3. En el menu izquierdo, busca **Environments**
 
-```
-   Code   Issues   Pull requests   Actions   Settings  ← ESTE
-```
+### 4.2 Crear environment "production"
 
-4. En el menu lateral izquierdo, busca la seccion **"Environments"**
-
-```
-   Settings
-   ├── General
-   ├── ...
-   ├── Environments  ← ESTE
-   ├── ...
-```
-
-### 4.2 Crear el environment "production"
-
-1. Haz clic en **"New environment"**
-2. En "Name" escribe exactamente: `production` (en minusculas, sin espacios)
-3. Haz clic en **"Configure environment"**
-4. (Opcional pero recomendado) Activa **"Required reviewers"** y agrega tu usuario
-   - Esto hace que cada deploy a produccion necesite tu aprobacion manual
-   - Es una red de seguridad: si alguien hace push a main por error, el deploy no se ejecuta solo
-5. Baja hasta la seccion **"Environment secrets"**
-6. Haz clic en **"Add secret"**
-7. Agrega este secret:
+1. Clic en **"New environment"**
+2. Nombre: `production` (exacto, minusculas)
+3. Clic en **"Configure environment"**
+4. (Opcional) Activa **"Required reviewers"** → agrega tu usuario
+   - Asi cada deploy a produccion necesita tu aprobacion manual
+5. Baja a **"Environment secrets"** → **"Add secret"**
 
 ```
 Name:   VPS_DEPLOY_PATH
-Value:  /root/app
+Value:  /root/app/infra
 ```
 
-8. Haz clic en **"Add secret"** para guardarlo
+6. Guardar
 
-### 4.3 Crear el environment "staging"
+### 4.3 Crear environment "staging"
 
-1. Vuelve a **Settings > Environments**
-2. Haz clic en **"New environment"**
-3. En "Name" escribe exactamente: `staging`
-4. Haz clic en **"Configure environment"**
-5. NO actives "Required reviewers" (staging se deploya automaticamente)
-6. Baja a **"Environment secrets"**
-7. Agrega:
+1. Vuelve a Settings > Environments > **"New environment"**
+2. Nombre: `staging`
+3. **"Configure environment"**
+4. NO actives "Required reviewers" (staging se deploya solo)
+5. **"Environment secrets"** → **"Add secret"**
 
 ```
 Name:   VPS_DEPLOY_PATH
-Value:  /root/app-dev
+Value:  /root/app-dev/infra
 ```
 
-8. Guarda
+6. Guardar
 
-### 4.4 Repetir para el repositorio de Frontend
+### 4.4 Repetir en el repo de Frontend
 
-Haz **exactamente lo mismo** en el repo del frontend (`blitz-frontend` o como se llame):
-
-1. Settings > Environments > New environment > `production` > secret `VPS_DEPLOY_PATH` = `/root/app`
-2. Settings > Environments > New environment > `staging` > secret `VPS_DEPLOY_PATH` = `/root/app-dev`
-
-### Verificacion
-
-Al terminar, ambos repos deben tener esto:
-
-```
-Backend repo:
-  Environments:
-    production  → VPS_DEPLOY_PATH = /root/app
-    staging     → VPS_DEPLOY_PATH = /root/app-dev
-
-Frontend repo:
-  Environments:
-    production  → VPS_DEPLOY_PATH = /root/app
-    staging     → VPS_DEPLOY_PATH = /root/app-dev
-```
+Exactamente lo mismo:
+- `production` → `VPS_DEPLOY_PATH` = `/root/app/infra`
+- `staging` → `VPS_DEPLOY_PATH` = `/root/app-dev/infra`
 
 ---
 
-## 5. PASO 2: Configurar los Secrets en GitHub
+## 5. PASO 2: Configurar Secrets en GitHub
 
-Los secrets son valores sensibles (contrasenas, claves SSH) que GitHub guarda encriptados y los inyecta en los workflows.
+> Estos secretos son **compartidos** (mismo VPS para ambos entornos).
+> Hacer en **AMBOS repos**.
 
-### 5.1 Secrets a nivel de REPOSITORIO (compartidos entre environments)
+### 5.1 Ir a los secrets del repositorio
 
-Estos secretos son los mismos para produccion y staging porque usamos el **mismo servidor VPS**.
+Settings > **Secrets and variables** > **Actions** > **"New repository secret"**
 
-1. En tu repo de Backend, ve a:
-   **Settings > Secrets and variables > Actions**
+### 5.2 Agregar 3 secretos
 
-```
-   Settings
-   ├── ...
-   ├── Secrets and variables
-   │   ├── Actions  ← ESTE
-   │   ├── ...
-```
-
-2. Haz clic en **"New repository secret"**
-3. Agrega estos 3 secretos, uno por uno:
-
-#### Secret 1: VPS_HOST
+#### VPS_HOST
 
 ```
 Name:   VPS_HOST
-Value:  85.215.xxx.xxx    ← Pon la IP publica de tu VPS IONOS
+Value:  85.215.xxx.xxx    ← IP publica de tu VPS IONOS
 ```
 
-> Para encontrar tu IP: entra a tu panel de IONOS > Servidores > tu VPS > la IP esta en la info general.
-
-#### Secret 2: VPS_USER
+#### VPS_USER
 
 ```
 Name:   VPS_USER
 Value:  root
 ```
 
-> Si usas otro usuario SSH (como `deploy`), pon ese.
-
-#### Secret 3: VPS_SSH_KEY
+#### VPS_SSH_KEY
 
 ```
 Name:   VPS_SSH_KEY
 Value:  (contenido completo de tu clave privada SSH)
 ```
 
-**Como obtener la clave SSH:**
-
-Si ya te conectas al VPS desde tu computadora con `ssh root@85.215.xxx.xxx`, tu clave privada esta en:
+**Como obtener la clave SSH** (en tu computadora LOCAL):
 
 ```bash
-# En tu computadora LOCAL (no en el VPS)
+# Si ya te conectas al VPS con SSH, tu clave esta aqui:
 cat ~/.ssh/id_rsa
-# O si usas ed25519:
+# O:
 cat ~/.ssh/id_ed25519
 ```
 
-Copia TODO el contenido, incluyendo las lineas `-----BEGIN` y `-----END`:
+Copia TODO, incluyendo `-----BEGIN` y `-----END`:
 
 ```
 -----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUA...
-(muchas lineas de texto)
-...
+...muchas lineas...
 -----END OPENSSH PRIVATE KEY-----
 ```
 
-Pega eso completo como valor del secret `VPS_SSH_KEY`.
-
-**Si NO tienes clave SSH configurada:**
+**Si NO tienes clave SSH:**
 
 ```bash
-# En tu computadora LOCAL
+# Generar clave nueva (en tu computadora LOCAL)
 ssh-keygen -t ed25519 -C "github-actions-deploy"
-# Te pregunta donde guardar (Enter para default)
-# Te pregunta passphrase (Enter para dejar vacia — necesario para CI/CD)
+# Presiona Enter para todo (dejar passphrase vacia)
 
 # Copiar la clave PUBLICA al VPS
 ssh-copy-id root@85.215.xxx.xxx
-# Te pedira la contrasena del VPS una ultima vez
 
-# Verificar que funciona (no deberia pedir contrasena)
-ssh root@85.215.xxx.xxx "echo Conexion exitosa"
+# Verificar (no debe pedir contrasena)
+ssh root@85.215.xxx.xxx "echo OK"
 
 # Copiar la clave PRIVADA para GitHub
 cat ~/.ssh/id_ed25519
-# Pega este contenido como VPS_SSH_KEY en GitHub
+# ← Pega esto como VPS_SSH_KEY en GitHub
 ```
 
-### 5.2 Repetir en el repo de Frontend
+### Importante
 
-Agrega los mismos 3 secretos en el repo del frontend:
-- `VPS_HOST` (misma IP)
-- `VPS_USER` (mismo usuario)
-- `VPS_SSH_KEY` (misma clave)
-
-### Verificacion
-
-Al terminar, cada repo debe tener:
-
-```
-Repository secrets (nivel repo):
-  VPS_HOST      = 85.215.xxx.xxx
-  VPS_USER      = root
-  VPS_SSH_KEY   = -----BEGIN OPENSSH PRIVATE KEY-----...
-
-Environment "production":
-  VPS_DEPLOY_PATH = /root/app
-
-Environment "staging":
-  VPS_DEPLOY_PATH = /root/app-dev
-```
-
-> NOTA: Si antes tenias un secret `VPS_DEPLOY_PATH` a nivel de repositorio (no de environment), **eliminalo**. Los secrets de environment tienen prioridad, pero es mejor no tener duplicados para evitar confusion.
+Si antes tenias un secret `VPS_DEPLOY_PATH` a nivel de **repositorio**, eliminalo. Ese secret ahora vive dentro de cada Environment.
 
 ---
 
-## 6. PASO 3: Preparar el VPS (servidor)
+## 6. PASO 3: Preparar el VPS
 
-Conectate a tu VPS por SSH:
+Conectate al VPS:
 
 ```bash
 ssh root@85.215.xxx.xxx
 ```
 
-### 6.1 Verificar que Docker esta instalado
+### 6.1 Verificar Docker
 
 ```bash
 docker --version
-# Debe mostrar algo como: Docker version 24.x.x o superior
+# Debe mostrar Docker version 24+ o superior
 
 docker compose version
-# Debe mostrar algo como: Docker Compose version v2.x.x
+# Debe mostrar Docker Compose version v2+
 ```
 
-Si no tienes Docker instalado:
+### 6.2 Tu produccion actual (no tocar, solo verificar)
+
 ```bash
-curl -fsSL https://get.docker.com | sh
+ls /root/app/
+# Debe mostrar: 700  backend  frontend  infra
+
+ls /root/app/infra/
+# Debe mostrar: compose.yaml  .env  (y tal vez .env.save)
+
+ls /root/app/backend/
+# Debe mostrar: squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
 ```
 
-### 6.2 Crear la estructura de directorios
+### 6.3 Crear la estructura de Staging
 
 ```bash
-# Crear directorio de STAGING (produccion ya existe en /root/app)
-mkdir -p /root/app-dev/nginx
+# Crear todos los directorios necesarios
+mkdir -p /root/app-dev/backend
+mkdir -p /root/app-dev/frontend
+mkdir -p /root/app-dev/infra/nginx
 ```
 
-Si `/root/app` no existe todavia:
+### 6.4 Copiar el Firebase JSON a staging
+
 ```bash
-mkdir -p /root/app/nginx
+cp /root/app/backend/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json \
+   /root/app-dev/backend/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
 ```
 
-### 6.3 Verificar la estructura
+### 6.5 Subir el compose.yaml al VPS
+
+Desde tu **computadora local** (carpeta `infra/`):
 
 ```bash
-ls -la /root/app/
-# Debe existir (produccion actual)
+# Subir compose.yaml a staging
+scp compose.yaml root@85.215.xxx.xxx:/root/app-dev/infra/compose.yaml
 
-ls -la /root/app-dev/
-# Debe existir (lo acabamos de crear)
+# IMPORTANTE: Tambien actualizar el de produccion (tiene el volume mount de Firebase)
+scp compose.yaml root@85.215.xxx.xxx:/root/app/infra/compose.yaml
 ```
 
-### 6.4 Subir el compose.yaml a ambos directorios
-
-Desde tu **computadora local**, sube el archivo con `scp`:
+### 6.6 Subir las configuraciones de Nginx
 
 ```bash
-# Desde la carpeta infra/ de tu proyecto local
-scp compose.yaml root@85.215.xxx.xxx:/root/app/compose.yaml
-scp compose.yaml root@85.215.xxx.xxx:/root/app-dev/compose.yaml
-```
-
-> **Alternativa**: Si prefieres hacerlo desde el VPS directamente:
-> ```bash
-> # En el VPS
-> nano /root/app/compose.yaml
-> # Pega el contenido del compose.yaml
-> # Ctrl+O para guardar, Ctrl+X para salir
->
-> # Copiar al otro directorio
-> cp /root/app/compose.yaml /root/app-dev/compose.yaml
-> ```
-
-### 6.5 Subir las configuraciones de Nginx
-
-```bash
-# Desde tu computadora local, carpeta infra/
-
-# Nginx para PRODUCCION (con SSL)
-scp nginx/default.conf root@85.215.xxx.xxx:/root/app/nginx/default.conf
+# Nginx para PRODUCCION (con SSL) — ya deberia existir, pero por si acaso:
+scp nginx/default.conf root@85.215.xxx.xxx:/root/app/infra/nginx/default.conf
 
 # Nginx para STAGING (sin SSL, HTTP simple)
-scp nginx/staging.conf root@85.215.xxx.xxx:/root/app-dev/nginx/default.conf
+scp nginx/staging.conf root@85.215.xxx.xxx:/root/app-dev/infra/nginx/default.conf
 ```
 
-> **Importante**: El archivo se llama `staging.conf` en tu repo, pero se copia como `default.conf` en el VPS. Esto es porque el `compose.yaml` siempre monta `./nginx/default.conf`.
-
-### 6.6 Crear el archivo .env de PRODUCCION
-
-En el VPS:
+> **Atencion**: El archivo se llama `staging.conf` en tu repo, pero se copia como `default.conf` en el VPS. Esto es porque el compose.yaml siempre monta `./nginx/default.conf`.
 
 ```bash
-nano /root/app/.env
+# (Opcional) Subir scripts de SSL por si los necesitas en el futuro:
+scp init-letsencrypt.sh root@85.215.xxx.xxx:/root/app/infra/init-letsencrypt.sh
+scp nginx/init.conf root@85.215.xxx.xxx:/root/app/infra/nginx/init.conf
 ```
 
-Pega esto y **edita cada valor** con tus datos reales:
+> Estos archivos solo se usan si necesitas re-generar el certificado SSL desde cero. Si produccion ya tiene SSL funcionando, no los necesitas ahora.
+
+### 6.7 Crear el .env de PRODUCCION
+
+> **Si ya tienes un .env en /root/app/infra/ que funciona**, solo necesitas agregar las variables nuevas.
+
+```bash
+nano /root/app/infra/.env
+```
+
+Asegurate de que tenga TODAS estas variables (agrega las que falten):
 
 ```bash
 # --- Docker Compose ---
@@ -466,66 +396,66 @@ COMPOSE_PROJECT_NAME=blitz-prod
 COMPOSE_PROFILES=ssl
 IMAGE_TAG=latest
 
-# --- Puertos (Produccion) ---
+# --- Puertos ---
 HTTP_PORT=80
 HTTPS_PORT=443
 BACKEND_PORT=8000
 PGADMIN_PORT=5050
 
-# --- Base de Datos ---
-DB_USER=tu_usuario_de_bd_produccion
-DB_PASSWORD=tu_password_seguro_produccion
-DB_NAME=blitz_production
+# --- Base de Datos (tus valores reales) ---
+DB_USER=tu_usuario_bd
+DB_PASSWORD=tu_password_bd
+DB_NAME=tu_nombre_bd
 
 # --- Django ---
-SECRET_KEY=tu-secret-key-de-produccion-algo-largo-y-aleatorio
+SECRET_KEY=tu-secret-key-de-produccion
 
 # --- Firebase ---
-FIREBASE_CREDENTIALS_PATH=/app-dev/core/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
+FIREBASE_CREDENTIALS_PATH=squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
 
-# --- Stripe (LIVE keys para produccion) ---
+# --- Stripe ---
 STRIPE_SECRET_KEY=sk_live_xxx
 STRIPE_PUBLISHABLE_KEY=pk_live_xxx
 STRIPE_WEBHOOK_SECRET=whsec_xxx
 
 # --- PGAdmin ---
 PGADMIN_EMAIL=admin@blitz.com
-PGADMIN_PASSWORD=password_seguro_pgadmin
+PGADMIN_PASSWORD=password_seguro
 ```
 
-Guarda con `Ctrl+O`, `Enter`, `Ctrl+X`.
+Guardar: `Ctrl+O`, `Enter`, `Ctrl+X`
 
-### 6.7 Crear el archivo .env de STAGING
+### 6.8 Crear el .env de STAGING
 
 ```bash
-nano /root/app-dev/.env
+nano /root/app-dev/infra/.env
 ```
 
-Pega esto y **edita cada valor**:
+Pega esto y edita con valores de staging:
 
 ```bash
 # --- Docker Compose ---
 COMPOSE_PROJECT_NAME=blitz-dev
 IMAGE_TAG=dev
 
-# --- Puertos (Staging — DIFERENTES de produccion!) ---
+# --- Puertos (DIFERENTES de produccion!) ---
 HTTP_PORT=8080
 HTTPS_PORT=8443
 BACKEND_PORT=8001
 PGADMIN_PORT=6060
 
-# --- Base de Datos (DIFERENTE de produccion!) ---
+# --- Base de Datos (DIFERENTES de produccion!) ---
 DB_USER=blitz_dev_user
 DB_PASSWORD=dev_password_seguro
 DB_NAME=blitz_development
 
 # --- Django ---
-SECRET_KEY=otra-secret-key-diferente-para-staging
+SECRET_KEY=otra-secret-key-para-staging
 
-# --- Firebase (pueden ser las mismas credenciales) ---
-FIREBASE_CREDENTIALS_PATH=/app-dev/core/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
+# --- Firebase ---
+FIREBASE_CREDENTIALS_PATH=squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
 
-# --- Stripe (TEST keys — nunca uses live keys en staging!) ---
+# --- Stripe (TEST keys!) ---
 STRIPE_SECRET_KEY=sk_test_xxx
 STRIPE_PUBLISHABLE_KEY=pk_test_xxx
 STRIPE_WEBHOOK_SECRET=whsec_test_xxx
@@ -535,270 +465,187 @@ PGADMIN_EMAIL=admin@blitz.local
 PGADMIN_PASSWORD=admin
 ```
 
-Guarda con `Ctrl+O`, `Enter`, `Ctrl+X`.
+Guardar: `Ctrl+O`, `Enter`, `Ctrl+X`
 
-### 6.8 Verificar que todo esta en su lugar
+### 6.9 Verificar que todo esta en su lugar
 
 ```bash
 echo "=== PRODUCCION ==="
-ls -la /root/app/
-# Debe mostrar: compose.yaml, .env, nginx/
+ls -la /root/app/infra/
+# compose.yaml  .env  nginx/
+
+echo "=== PRODUCCION NGINX ==="
+ls -la /root/app/infra/nginx/
+# default.conf
+
+echo "=== PRODUCCION FIREBASE ==="
+ls -la /root/app/backend/squapup*.json
+# squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
 
 echo "=== STAGING ==="
-ls -la /root/app-dev/
-# Debe mostrar: compose.yaml, .env, nginx/
+ls -la /root/app-dev/infra/
+# compose.yaml  .env  nginx/
 
-echo "=== NGINX PRODUCCION ==="
-ls -la /root/app/nginx/
-# Debe mostrar: default.conf
+echo "=== STAGING NGINX ==="
+ls -la /root/app-dev/infra/nginx/
+# default.conf
 
-echo "=== NGINX STAGING ==="
-ls -la /root/app-dev/nginx/
-# Debe mostrar: default.conf
+echo "=== STAGING FIREBASE ==="
+ls -la /root/app-dev/backend/squapup*.json
+# squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json
 
-echo "=== VERIFICAR .env PRODUCCION ==="
-cat /root/app/.env | head -5
-# Debe mostrar: COMPOSE_PROJECT_NAME=blitz-prod
-
-echo "=== VERIFICAR .env STAGING ==="
-cat /root/app-dev/.env | head -5
-# Debe mostrar: COMPOSE_PROJECT_NAME=blitz-dev
+echo "=== VERIFICAR .env ==="
+head -3 /root/app/infra/.env
+# COMPOSE_PROJECT_NAME=blitz-prod
+head -3 /root/app-dev/infra/.env
+# COMPOSE_PROJECT_NAME=blitz-dev
 ```
 
 ---
 
-## 7. PASO 4: Primer deploy manual (verificacion)
+## 7. PASO 4: Primer deploy manual
 
-Antes de confiar en el CI/CD automatico, vamos a levantar todo manualmente para verificar que funciona.
+### 7.1 Actualizar PRODUCCION
 
-### 7.1 Asegurarse de que las imagenes existen en GHCR
-
-Las imagenes Docker deben existir en GitHub Container Registry. Si nunca has hecho push a `development`, la imagen `:dev` no existira todavia.
-
-**Opcion A**: Si ya tienes imagenes publicadas:
-
-```bash
-# En el VPS, verificar
-docker pull ghcr.io/jesuslab135/blitz-backend:latest
-docker pull ghcr.io/jesuslab135/blitz-frontend:latest
-docker pull ghcr.io/jesuslab135/blitz-backend:dev
-docker pull ghcr.io/jesuslab135/blitz-frontend:dev
-```
-
-**Opcion B**: Si la imagen `:dev` no existe, primero haz un push a `development` para que el workflow la construya (ver Paso 5).
-
-### 7.2 Levantar PRODUCCION
+> El compose.yaml nuevo tiene el volume mount de Firebase que faltaba.
+>
+> **IMPORTANTE**: Si tu produccion actual NO tenia `COMPOSE_PROJECT_NAME` en el `.env`,
+> Docker usaba el nombre del directorio (`infra`) como prefijo de contenedores.
+> Al agregar `COMPOSE_PROJECT_NAME=blitz-prod`, Docker crearia contenedores NUEVOS
+> (`blitz-prod-backend-1`) pero los viejos (`infra-backend-1`) seguirian corriendo,
+> causando conflicto de puertos. Por eso hay que bajar los contenedores ANTES de
+> cambiar el `.env`.
 
 ```bash
-cd /root/app
+cd /root/app/infra
 
-# Verificar que Docker Compose lee el .env correctamente
-docker compose config | head -20
-# Debe mostrar "name: blitz-prod" y las variables resueltas
+# 1. PRIMERO: Bajar los contenedores actuales (con la config vieja)
+docker compose down
 
-# Levantar todos los servicios
+# 2. AHORA editar el .env (si aun no lo hiciste en paso 6.7)
+#    nano .env  ← agregar COMPOSE_PROJECT_NAME=blitz-prod, etc.
+
+# 3. Tambien reemplazar compose.yaml si aun no lo hiciste (paso 6.5)
+
+# 4. Verificar que el compose lee las variables bien
+docker compose config | head -5
+# Debe mostrar: name: blitz-prod
+
+# 5. Levantar con la nueva configuracion
 docker compose up -d
 
-# Ver el estado
-docker compose ps
+# 6. Verificar que Firebase carga
+docker compose exec backend python3 manage.py shell -c "from api.Authentication.authentication import FirebaseAuthentication; import firebase_admin; print('Firebase OK:', firebase_admin.get_app().name)"
+# Debe mostrar: Firebase OK: [DEFAULT]
 ```
 
-Deberias ver algo asi:
+> **Nota**: El `docker compose down` detiene los contenedores pero NO borra la base
+> de datos (los volumenes se preservan). Tus datos de produccion estan seguros.
 
-```
-NAME                     IMAGE                                         STATUS
-blitz-prod-backend-1     ghcr.io/jesuslab135/blitz-backend:latest     Up (healthy)
-blitz-prod-frontend-1    ghcr.io/jesuslab135/blitz-frontend:latest    Up
-blitz-prod-db-1          postgres:16                                   Up (healthy)
-blitz-prod-redis-1       redis:7-alpine                                Up (healthy)
-blitz-prod-nginx-1       nginx:alpine                                  Up
-blitz-prod-certbot-1     certbot/certbot                               Up
-```
-
-> **Fijate en los nombres**: todos empiezan con `blitz-prod-`. Eso confirma que el `COMPOSE_PROJECT_NAME` funciona.
-
-### 7.3 Levantar STAGING
+### 7.2 Levantar STAGING
 
 ```bash
-cd /root/app-dev
+cd /root/app-dev/infra
 
 # Verificar configuracion
-docker compose config | head -20
-# Debe mostrar "name: blitz-dev"
+docker compose config | head -5
+# Debe mostrar: name: blitz-dev
 
-# Levantar
+# Levantar todo
 docker compose up -d
 
 # Ver estado
 docker compose ps
 ```
 
-Deberias ver:
+Deberias ver algo como:
 
 ```
-NAME                    IMAGE                                        STATUS
-blitz-dev-backend-1     ghcr.io/jesuslab135/blitz-backend:dev       Up (healthy)
-blitz-dev-frontend-1    ghcr.io/jesuslab135/blitz-frontend:dev      Up
-blitz-dev-db-1          postgres:16                                  Up (healthy)
-blitz-dev-redis-1       redis:7-alpine                               Up (healthy)
-blitz-dev-nginx-1       nginx:alpine                                 Up
+NAME                    STATUS
+blitz-dev-backend-1     Up (healthy)
+blitz-dev-frontend-1    Up
+blitz-dev-db-1          Up (healthy)
+blitz-dev-redis-1       Up (healthy)
+blitz-dev-nginx-1       Up
 ```
 
-> Nota: certbot NO aparece en staging porque no tiene `COMPOSE_PROFILES=ssl`.
+> Nota: Si la imagen `:dev` no existe todavia en GHCR, primero haz un push a `development` (ver Paso 5).
 
-### 7.4 Verificar que no hay conflictos de puertos
+### 7.3 Verificar que no chocan
 
 ```bash
-# Ver TODOS los contenedores corriendo (ambos entornos)
+# Ver TODOS los contenedores de ambos entornos
 docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
 ```
 
-Debe mostrar algo como:
+Debes ver dos grupos separados:
 
 ```
-NAMES                    PORTS                                      STATUS
-blitz-prod-nginx-1       0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp Up
-blitz-prod-backend-1     0.0.0.0:8000->8000/tcp                    Up
-blitz-dev-nginx-1        0.0.0.0:8080->80/tcp, 0.0.0.0:8443->443  Up
-blitz-dev-backend-1      0.0.0.0:8001->8000/tcp                    Up
+blitz-prod-nginx-1       0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp    Up
+blitz-prod-backend-1     0.0.0.0:8000->8000/tcp                       Up
+blitz-dev-nginx-1        0.0.0.0:8080->80/tcp                         Up
+blitz-dev-backend-1      0.0.0.0:8001->8000/tcp                       Up
 ```
 
-Puntos clave:
-- Produccion usa puertos **80, 443, 8000**
-- Staging usa puertos **8080, 8443, 8001**
-- NO hay conflictos
-
-### 7.5 Verificar que los volumenes estan separados
+### 7.4 Verificar volumenes separados
 
 ```bash
 docker volume ls | grep blitz
 ```
 
-Debe mostrar:
-
 ```
-blitz-prod_postgres_data
-blitz-prod_redis_data
-blitz-prod_frontend_dist
-blitz-prod_certbot_conf
-blitz-prod_certbot_www
-blitz-dev_postgres_data      ← BD SEPARADA!
-blitz-dev_redis_data
-blitz-dev_frontend_dist
+blitz-prod_postgres_data     ← BD de produccion
+blitz-dev_postgres_data      ← BD de staging (SEPARADA!)
 ```
-
-`blitz-prod_postgres_data` y `blitz-dev_postgres_data` son volumenes DIFERENTES. La base de datos de staging nunca tocara la de produccion.
-
-### 7.6 Probar acceso web
-
-```bash
-# Produccion (HTTPS)
-curl -s -o /dev/null -w "HTTP %{http_code}\n" https://jesuslab135.com
-
-# Staging (HTTP en puerto 8080)
-curl -s -o /dev/null -w "HTTP %{http_code}\n" http://jesuslab135.com:8080
-
-# Backend produccion
-curl -s -o /dev/null -w "HTTP %{http_code}\n" https://jesuslab135.com/api/
-
-# Backend staging
-curl -s -o /dev/null -w "HTTP %{http_code}\n" http://jesuslab135.com:8080/api/
-```
-
-Si todo da `HTTP 200` (o `301` para el redirect HTTP→HTTPS en prod), funciona.
 
 ---
 
 ## 8. PASO 5: Probar el flujo automatico
 
-### 8.1 Probar deploy a Staging
+### 8.1 Deploy a Staging
 
-En tu **computadora local**:
+En tu computadora local:
 
 ```bash
-# Ir al repo del backend
 cd backend
-
-# Asegurarte de estar en development
 git checkout development
-
-# Hacer un cambio pequeno (por ejemplo, agregar un comentario)
-echo "# test staging deploy" >> README.md
-
-# Commit y push
+echo "# test staging" >> README.md
 git add README.md
 git commit -m "test: verificar deploy automatico a staging"
 git push origin development
 ```
 
-### 8.2 Ver el workflow en accion
+### 8.2 Ver el workflow en GitHub
 
-1. Ve a tu repo en GitHub
-2. Haz clic en la pestana **"Actions"**
-3. Deberias ver el workflow **"Build & Deploy Backend"** ejecutandose
-4. Haz clic en el para ver el detalle
-
-Veras 3 jobs:
+1. Ve a tu repo > pestana **Actions**
+2. Veras **"Build & Deploy Backend"** ejecutandose
+3. Clic para ver los 3 jobs:
 
 ```
-setup        ✅ (detecta: environment=staging, image_tag=dev)
-   |
-   v
+setup           ✅ (detecta: environment=staging, image_tag=dev)
 build-and-push  🔄 (construyendo imagen...)
-   |
-   v
 deploy          ⏳ (esperando build...)
-```
-
-5. Cuando termine, el job `deploy` mostrara "staging" como environment
-6. En los logs del deploy veras:
-
-```
-=== Desplegando staging ===
-=== Pulling imagen: ghcr.io/jesuslab135/blitz-backend:dev ===
-...
-=== Deploy completado: staging / abc123 ===
 ```
 
 ### 8.3 Verificar en el VPS
 
 ```bash
 ssh root@85.215.xxx.xxx
-cd /root/app-dev
+cd /root/app-dev/infra
 docker compose ps
-# El backend debe estar corriendo con la imagen nueva
-
 docker compose logs backend --tail 20
-# Debe mostrar que arranco correctamente
 ```
 
-### 8.4 Probar deploy a Produccion
+### 8.4 Deploy a Produccion
 
 ```bash
-# En tu computadora local
 cd backend
 git checkout main
-git merge development  # O hacer un PR y merge
+git merge development
 git push origin main
 ```
 
-Ve a Actions de nuevo. Esta vez:
-- Si activaste "Required reviewers" en el environment de produccion, GitHub te pedira aprobacion antes del job `deploy`
-- Ve a Actions > el workflow > haz clic en "Review deployments" > "Approve"
-- El deploy procedera
-
-### 8.5 Repetir con el Frontend
-
-Haz lo mismo con el repo del frontend:
-
-```bash
-cd frontend
-git checkout development
-# Hacer un cambio
-git add .
-git commit -m "test: verificar deploy frontend staging"
-git push origin development
-```
+Si activaste "Required reviewers", aprueba en Actions > Review deployments.
 
 ---
 
@@ -808,369 +655,262 @@ git push origin development
 
 | Servicio | URL |
 |----------|-----|
-| Frontend (web) | `https://jesuslab135.com` |
+| Frontend | `https://jesuslab135.com` |
 | Backend API | `https://jesuslab135.com/api/` |
 | WebSocket | `wss://jesuslab135.com/ws/` |
-| Swagger docs | `https://jesuslab135.com/api/schema/swagger-ui/` |
+| Swagger | `https://jesuslab135.com/api/schema/swagger-ui/` |
 
 ### Staging
 
 | Servicio | URL |
 |----------|-----|
-| Frontend (web) | `http://jesuslab135.com:8080` |
+| Frontend | `http://jesuslab135.com:8080` |
 | Backend API | `http://jesuslab135.com:8080/api/` |
 | WebSocket | `ws://jesuslab135.com:8080/ws/` |
-| Swagger docs | `http://jesuslab135.com:8080/api/schema/swagger-ui/` |
-| Backend directo (sin nginx) | `http://jesuslab135.com:8001` |
+| Swagger | `http://jesuslab135.com:8080/api/schema/swagger-ui/` |
 
 ### PGAdmin (solo si se activa)
 
 ```bash
-# Activar PGAdmin en staging
-cd /root/app-dev
+# Activar en staging
+cd /root/app-dev/infra
 docker compose --profile tools up -d pgadmin
-# Acceder en http://jesuslab135.com:6060
+# → http://jesuslab135.com:6060
 ```
-
-> Nota: Staging no tiene SSL. Para un entorno de pruebas esto esta bien. Si necesitas SSL para staging en el futuro, puedes configurar un subdominio `dev.jesuslab135.com` con su propio certificado.
 
 ---
 
-## 10. Diagrama completo del flujo
+## 10. Diagrama del flujo completo
 
 ```
 DEVELOPER (tu computadora)
 │
-├── git push development ──────────────────────────────────┐
-│                                                          │
-├── git push main ────────────────────────────────┐        │
-│                                                 │        │
-│                                                 ▼        ▼
-│                                         ┌─ GITHUB ACTIONS ─┐
-│                                         │                   │
-│                                         │  1. setup job     │
-│                                         │     detecta rama  │
-│                                         │                   │
-│                                         │  main → production│
-│                                         │  dev  → staging   │
-│                                         │                   │
-│                                         │  2. build-and-push│
-│                                         │     construye img │
-│                                         │     sube a GHCR   │
-│                                         │                   │
-│                                         │  main → :latest   │
-│                                         │  dev  → :dev      │
-│                                         │                   │
-│                                         │  3. deploy job    │
-│                                         │     SSH al VPS    │
-│                                         └───────┬───────────┘
-│                                                 │
-│                                    ┌────────────┴────────────┐
-│                                    │                         │
-│                              ┌─────▼─────┐           ┌──────▼──────┐
-│                              │  VPS      │           │  VPS        │
-│                              │ /root/app │           │ /root/app-dev│
-│                              │           │           │             │
-│                              │ .env:     │           │ .env:       │
-│                              │ blitz-prod│           │ blitz-dev   │
-│                              │ :latest   │           │ :dev        │
-│                              │ port 80   │           │ port 8080   │
-│                              └─────┬─────┘           └──────┬──────┘
-│                                    │                         │
-│                                    ▼                         ▼
-│                           ┌────────────────┐       ┌────────────────┐
-│                           │  PRODUCCION    │       │  STAGING       │
-│                           │                │       │                │
-│                           │  nginx :80/443 │       │  nginx :8080   │
-│                           │  backend :8000 │       │  backend :8001 │
-│                           │  db (separada) │       │  db (separada) │
-│                           │  redis         │       │  redis         │
-│                           │  certbot (SSL) │       │  (sin SSL)    │
-│                           └────────────────┘       └────────────────┘
+├── git push development ─────────────────────────────────────┐
+│                                                             │
+├── git push main ──────────────────────────────┐             │
+│                                               │             │
+│                                               ▼             ▼
+│                                       ┌── GITHUB ACTIONS ──┐
+│                                       │                     │
+│                                       │  1. setup           │
+│                                       │     main → prod     │
+│                                       │     dev  → staging  │
+│                                       │                     │
+│                                       │  2. build-and-push  │
+│                                       │     main → :latest  │
+│                                       │     dev  → :dev     │
+│                                       │                     │
+│                                       │  3. deploy (SSH)    │
+│                                       └──────┬──────────────┘
+│                                              │
+│                                 ┌────────────┴───────────┐
+│                                 │                        │
+│                          ┌──────▼──────┐          ┌──────▼──────┐
+│                          │ /root/app/  │          │/root/app-dev│
+│                          │   infra/    │          │   infra/    │
+│                          │             │          │             │
+│                          │ blitz-prod  │          │ blitz-dev   │
+│                          │ :latest     │          │ :dev        │
+│                          │ port 80/443 │          │ port 8080   │
+│                          └──────┬──────┘          └──────┬──────┘
+│                                 │                        │
+│                                 ▼                        ▼
+│                         ┌──────────────┐        ┌──────────────┐
+│                         │ PRODUCCION   │        │ STAGING      │
+│                         │              │        │              │
+│                         │ nginx :80    │        │ nginx :8080  │
+│                         │ backend:8000 │        │ backend:8001 │
+│                         │ db (separada)│        │ db (separada)│
+│                         │ redis        │        │ redis        │
+│                         │ certbot      │        │ (sin SSL)    │
+│                         └──────────────┘        └──────────────┘
 │
-│  Acceso:
-│  https://jesuslab135.com         http://jesuslab135.com:8080
+│  https://jesuslab135.com          http://jesuslab135.com:8080
 ```
 
 ---
 
-## 11. Troubleshooting (cuando algo falla)
+## 11. Troubleshooting
 
 ### "Error: port is already allocated"
 
-**Causa**: Otro servicio ya usa ese puerto.
-
 ```bash
-# Ver que usa el puerto 8080
+# Ver que usa el puerto
 ss -tlnp | grep 8080
-
-# Si es un contenedor viejo, paralo
+# Si es un contenedor viejo:
 docker ps -a | grep 8080
-docker stop <container_id>
-docker rm <container_id>
-
+docker stop <container_id> && docker rm <container_id>
 # Re-levantar
-cd /root/app-dev && docker compose up -d
+cd /root/app-dev/infra && docker compose up -d
 ```
 
-### "Error: image not found" o "manifest unknown"
+### "manifest unknown" o "image not found"
 
-**Causa**: La imagen `:dev` no ha sido construida todavia.
+La imagen `:dev` no existe todavia. Haz push a `development` primero, o ejecuta el workflow manualmente:
+
+1. GitHub > repo > Actions
+2. "Build & Deploy Backend" > "Run workflow"
+3. Selecciona rama `development`
+4. "Run workflow"
+
+### "Permission denied" en deploy SSH
 
 ```bash
-# Verificar que imagenes existen
-docker images | grep blitz
-
-# Solucion: hacer un push a development para triggear el build
-# O ejecutar el workflow manualmente desde GitHub Actions
+# Verificar conexion desde tu computadora
+ssh root@85.215.xxx.xxx "echo OK"
+# Si falla: regenerar clave y actualizar VPS_SSH_KEY en GitHub
 ```
 
-Para ejecutar manualmente:
-1. Ve a GitHub > tu repo > Actions
-2. Haz clic en el workflow "Build & Deploy Backend"
-3. Haz clic en "Run workflow"
-4. Selecciona la rama `development`
-5. Haz clic en "Run workflow"
-
-### "Permission denied" en el deploy SSH
-
-**Causa**: La clave SSH no coincide.
+### Firebase no inicializa
 
 ```bash
-# En tu computadora, verificar que puedes conectarte
-ssh -i ~/.ssh/id_ed25519 root@85.215.xxx.xxx "echo OK"
+cd /root/app/infra  # (o app-dev/infra para staging)
 
-# Si falla, regenerar y resubir la clave
-ssh-keygen -t ed25519 -C "github-actions"
-ssh-copy-id -i ~/.ssh/id_ed25519.pub root@85.215.xxx.xxx
+# 1. Verificar que el JSON existe en el host
+ls -la ../backend/squapup*.json
 
-# Actualizar el secret VPS_SSH_KEY en GitHub con la nueva clave privada
-cat ~/.ssh/id_ed25519
+# 2. Verificar que el volume mount funciona
+docker inspect $(docker compose ps -q backend) | grep -A 5 "Mounts"
+
+# 3. Verificar que el archivo llego al contenedor
+docker compose exec backend ls -la "/app/core/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json"
+
+# 4. Verificar que Firebase carga via Django
+docker compose exec backend python3 manage.py shell -c "from api.Authentication.authentication import FirebaseAuthentication; import firebase_admin; print('Firebase OK:', firebase_admin.get_app().name)"
 ```
 
-### Los contenedores inician pero la app no funciona
+### Los contenedores arrancan pero la app no funciona
 
 ```bash
-# Ver logs del backend
-cd /root/app-dev
 docker compose logs backend --tail 50
-
 # Errores comunes:
-# "could not connect to server" → db no esta lista, esperar unos segundos
-# "FIREBASE_CREDENTIALS_PATH" → ruta incorrecta en .env
-# "No module named..." → imagen desactualizada, hacer pull
-
-# Reiniciar todo
-docker compose down
-docker compose up -d
-docker compose logs -f
+# "could not connect to server" → esperar, db no esta lista aun
+# "FIREBASE_CREDENTIALS" → verificar volume mount (ver arriba)
+# "No module named" → imagen desactualizada, hacer pull
 ```
 
-### "db is unhealthy" o "depends_on condition failed"
+### "db is unhealthy"
 
 ```bash
-# Ver logs de la base de datos
-cd /root/app-dev
 docker compose logs db --tail 30
-
-# Error comun: password authentication failed
-# → Verificar DB_USER y DB_PASSWORD en .env
-# → Si cambiaste credenciales, necesitas resetear el volumen:
+# Si fallo por credenciales:
 docker compose down
 docker volume rm blitz-dev_postgres_data  # CUIDADO: borra datos de staging
 docker compose up -d
 ```
 
-### Staging funciona pero Produccion no (o viceversa)
+### Nginx no arranca ("ssl_certificate not found")
+
+Solo pasa en produccion si los certificados no existen:
 
 ```bash
-# Comparar las configuraciones
-diff <(cd /root/app && docker compose config) <(cd /root/app-dev && docker compose config)
-
-# Verificar que los .env son diferentes
-head -3 /root/app/.env
-# COMPOSE_PROJECT_NAME=blitz-prod
-
-head -3 /root/app-dev/.env
-# COMPOSE_PROJECT_NAME=blitz-dev
-```
-
-### El workflow de GitHub Actions falla en el job "deploy"
-
-1. Ve a Actions > el workflow fallido > job "deploy"
-2. Expande el step "Deploy to VPS"
-3. Lee el error
-
-Errores comunes:
-- `ssh: connect to host: Connection refused` → El VPS tiene el firewall cerrado para SSH (puerto 22)
-- `docker compose: command not found` → Docker Compose V2 no esta instalado en el VPS
-- `no configuration file provided: not found` → No existe `compose.yaml` en el directorio de deploy
-
-### Nginx no arranca con el error "ssl_certificate not found"
-
-**Esto pasa en produccion** si los certificados SSL no existen todavia.
-
-```bash
-cd /root/app
-
-# Solucion 1: Si es la primera vez, ejecutar el script init-letsencrypt.sh
-# (ver documentacion existente en infra/init-letsencrypt.sh)
-
-# Solucion 2: Temporalmente usar la config HTTP-only
-cp /root/app-dev/nginx/default.conf /root/app/nginx/default.conf
+# Opcion 1: Ejecutar init-letsencrypt.sh (primera vez)
+# Opcion 2: Temporalmente usar config sin SSL
+cp /root/app-dev/infra/nginx/default.conf /root/app/infra/nginx/default.conf
 docker compose restart nginx
 # Luego configurar SSL
 ```
 
 ---
 
-## 12. Referencia rapida de comandos
+## 12. Referencia de comandos
 
-### En el VPS
+### Produccion
 
 ```bash
-# ==========================================
-# PRODUCCION (/root/app)
-# ==========================================
+cd /root/app/infra
 
-cd /root/app
+docker compose ps                          # Estado de los contenedores
+docker compose logs backend --tail 50      # Logs del backend
+docker compose logs -f                     # Logs en tiempo real (Ctrl+C para salir)
+docker compose restart backend             # Reiniciar un servicio
+docker compose down && docker compose up -d  # Reiniciar todo
+docker compose pull backend                # Descargar imagen nueva
+docker compose exec backend python3 manage.py shell   # Django shell
+docker compose exec backend python3 manage.py migrate  # Migraciones
+docker compose config                      # Ver configuracion resuelta
+```
 
-# Ver estado de todos los contenedores
-docker compose ps
+### Staging
 
-# Ver logs del backend (ultimas 50 lineas)
-docker compose logs backend --tail 50
+```bash
+cd /root/app-dev/infra
+# Mismos comandos que produccion, pero desde este directorio
+```
 
-# Ver logs en tiempo real (Ctrl+C para salir)
-docker compose logs -f
+### Comandos globales
 
-# Reiniciar un servicio especifico
-docker compose restart backend
-
-# Reiniciar todo
-docker compose down && docker compose up -d
-
-# Actualizar imagen manualmente (sin CI/CD)
-docker compose pull backend
-docker compose up -d backend
-
-# Entrar al shell de Django
-docker compose exec backend python3 manage.py shell
-
-# Ejecutar migraciones
-docker compose exec backend python3 manage.py migrate
-
-# Ver la configuracion resuelta (debug)
-docker compose config
-
-# ==========================================
-# STAGING (/root/app-dev)
-# ==========================================
-
-cd /root/app-dev
-
-# Exactamente los mismos comandos, pero desde este directorio
-docker compose ps
-docker compose logs backend --tail 50
-docker compose restart backend
-# etc...
-
-# ==========================================
-# COMANDOS GLOBALES (ambos entornos)
-# ==========================================
-
-# Ver TODOS los contenedores del VPS
+```bash
+# Ver TODOS los contenedores
 docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
 
-# Ver todos los volumenes
+# Ver volumenes
 docker volume ls | grep blitz
 
-# Ver uso de disco
+# Uso de disco
 docker system df
 
-# Limpiar imagenes no usadas
+# Limpiar imagenes viejas
 docker image prune -f
 
-# Limpiar TODO lo no usado (imagenes, containers, networks)
-docker system prune -f
-# CUIDADO: no usar en produccion sin pensar
-
-# Activar PGAdmin en staging
-cd /root/app-dev && docker compose --profile tools up -d pgadmin
-
-# Desactivar PGAdmin
-cd /root/app-dev && docker compose --profile tools stop pgadmin
-```
-
-### En GitHub (manualmente)
-
-```
-Ejecutar workflow manualmente:
-  Repo > Actions > "Build & Deploy Backend" > "Run workflow"
-  > Seleccionar rama (main o development) > "Run workflow"
-
-Ver logs de un deploy:
-  Repo > Actions > clic en el workflow > clic en el job "deploy"
-
-Re-ejecutar un workflow fallido:
-  Repo > Actions > clic en el workflow fallido > "Re-run all jobs"
+# Activar/desactivar PGAdmin
+cd /root/app-dev/infra
+docker compose --profile tools up -d pgadmin    # activar
+docker compose --profile tools stop pgadmin     # desactivar
 ```
 
 ---
 
 ## 13. Checklist final
 
-Usa esta lista para verificar que todo esta configurado correctamente.
-
 ### GitHub (hacer en AMBOS repos: backend y frontend)
 
-- [ ] Secret de repositorio: `VPS_HOST` creado con la IP del VPS
-- [ ] Secret de repositorio: `VPS_USER` creado (normalmente `root`)
-- [ ] Secret de repositorio: `VPS_SSH_KEY` creado con la clave privada SSH completa
-- [ ] Environment `production` creado
-- [ ] Environment `production`: secret `VPS_DEPLOY_PATH` = `/root/app`
-- [ ] (Opcional) Environment `production`: "Required reviewers" activado
-- [ ] Environment `staging` creado
-- [ ] Environment `staging`: secret `VPS_DEPLOY_PATH` = `/root/app-dev`
-- [ ] Verificar que NO existe un secret `VPS_DEPLOY_PATH` a nivel de repositorio (solo en environments)
+- [ ] Secret de repositorio: `VPS_HOST` (IP del VPS)
+- [ ] Secret de repositorio: `VPS_USER` (normalmente `root`)
+- [ ] Secret de repositorio: `VPS_SSH_KEY` (clave privada SSH completa)
+- [ ] Environment `production` creado con `VPS_DEPLOY_PATH` = `/root/app/infra`
+- [ ] Environment `staging` creado con `VPS_DEPLOY_PATH` = `/root/app-dev/infra`
+- [ ] NO existe `VPS_DEPLOY_PATH` a nivel de repositorio (solo en environments)
 
 ### Archivos en el repositorio (commitear y pushear)
 
-- [ ] `infra/compose.yaml` — version parametrizada (sin `container_name:`, con `${}` variables)
-- [ ] `backend/.github/workflows/deploy.yml` — version multi-entorno
-- [ ] `frontend/.github/workflows/deploy.yml` — version multi-entorno
-- [ ] `frontend/Dockerfile` — fix en linea 32 (`/app-dev/dist` en vez de `/app/dist`)
+- [ ] `backend/Dockerfile` — rutas estandarizadas a `/app`
+- [ ] `backend/scripts/entrypoint.sh` — ruta estandarizada a `/app/core`
+- [ ] `frontend/Dockerfile` — rutas estandarizadas a `/app`
+- [ ] `infra/compose.yaml` — parametrizado + volume mount Firebase
+- [ ] `backend/.github/workflows/deploy.yml` — multi-entorno
+- [ ] `frontend/.github/workflows/deploy.yml` — multi-entorno
 
-### VPS — Directorio de Produccion (/root/app)
+### VPS — Produccion (/root/app/)
 
-- [ ] `/root/app/compose.yaml` existe (mismo archivo que infra/compose.yaml)
-- [ ] `/root/app/.env` existe con `COMPOSE_PROJECT_NAME=blitz-prod`
-- [ ] `/root/app/.env` tiene `COMPOSE_PROFILES=ssl`
-- [ ] `/root/app/.env` tiene `IMAGE_TAG=latest`
-- [ ] `/root/app/.env` tiene `BACKEND_PORT=8000`
-- [ ] `/root/app/.env` tiene `HTTP_PORT=80` y `HTTPS_PORT=443`
-- [ ] `/root/app/.env` tiene credenciales de BD de produccion
-- [ ] `/root/app/.env` tiene Stripe LIVE keys (o test si aun no estas en produccion real)
-- [ ] `/root/app/nginx/default.conf` existe (version con SSL)
-- [ ] Certificados SSL configurados (Let's Encrypt)
+- [ ] `/root/app/infra/compose.yaml` (version nueva con volume mount)
+- [ ] `/root/app/infra/.env` con `COMPOSE_PROJECT_NAME=blitz-prod`
+- [ ] `/root/app/infra/.env` tiene `COMPOSE_PROFILES=ssl`
+- [ ] `/root/app/infra/.env` tiene `IMAGE_TAG=latest`
+- [ ] `/root/app/infra/.env` tiene `BACKEND_PORT=8000`
+- [ ] `/root/app/infra/.env` tiene `HTTP_PORT=80` y `HTTPS_PORT=443`
+- [ ] `/root/app/infra/nginx/default.conf` (con SSL)
+- [ ] `/root/app/backend/squapup-...json` (Firebase credentials)
+- [ ] Firebase verificado: `Firebase OK: [DEFAULT]`
 
-### VPS — Directorio de Staging (/root/app-dev)
+### VPS — Staging (/root/app-dev/)
 
-- [ ] `/root/app-dev/compose.yaml` existe (mismo archivo)
-- [ ] `/root/app-dev/.env` existe con `COMPOSE_PROJECT_NAME=blitz-dev`
-- [ ] `/root/app-dev/.env` NO tiene `COMPOSE_PROFILES=ssl`
-- [ ] `/root/app-dev/.env` tiene `IMAGE_TAG=dev`
-- [ ] `/root/app-dev/.env` tiene `BACKEND_PORT=8001`
-- [ ] `/root/app-dev/.env` tiene `HTTP_PORT=8080`
-- [ ] `/root/app-dev/.env` tiene credenciales de BD DIFERENTES a produccion
-- [ ] `/root/app-dev/.env` tiene Stripe TEST keys
-- [ ] `/root/app-dev/nginx/default.conf` existe (version staging sin SSL)
+- [ ] `/root/app-dev/infra/compose.yaml` (mismo archivo que produccion)
+- [ ] `/root/app-dev/infra/.env` con `COMPOSE_PROJECT_NAME=blitz-dev`
+- [ ] `/root/app-dev/infra/.env` NO tiene `COMPOSE_PROFILES=ssl`
+- [ ] `/root/app-dev/infra/.env` tiene `IMAGE_TAG=dev`
+- [ ] `/root/app-dev/infra/.env` tiene `BACKEND_PORT=8001`
+- [ ] `/root/app-dev/infra/.env` tiene `HTTP_PORT=8080`
+- [ ] `/root/app-dev/infra/.env` tiene credenciales de BD DIFERENTES
+- [ ] `/root/app-dev/infra/.env` tiene Stripe TEST keys
+- [ ] `/root/app-dev/infra/nginx/default.conf` (sin SSL, copiado de staging.conf)
+- [ ] `/root/app-dev/backend/squapup-...json` (copia del Firebase JSON)
 
 ### Verificacion final
 
-- [ ] `docker compose ps` en `/root/app` muestra contenedores con prefijo `blitz-prod-`
-- [ ] `docker compose ps` en `/root/app-dev` muestra contenedores con prefijo `blitz-dev-`
-- [ ] `docker volume ls | grep blitz` muestra volumenes separados (`blitz-prod_postgres_data` y `blitz-dev_postgres_data`)
+- [ ] `docker compose ps` en produccion muestra prefijo `blitz-prod-`
+- [ ] `docker compose ps` en staging muestra prefijo `blitz-dev-`
+- [ ] `docker volume ls | grep blitz` muestra volumenes separados
 - [ ] `https://jesuslab135.com` carga (produccion)
 - [ ] `http://jesuslab135.com:8080` carga (staging)
 - [ ] Push a `development` triggerea deploy a staging
@@ -1180,23 +920,22 @@ Usa esta lista para verificar que todo esta configurado correctamente.
 
 ## Apendice: Tabla de puertos
 
-| Puerto | Servicio | Entorno | Notas |
-|--------|----------|---------|-------|
-| 80 | Nginx HTTP | Produccion | Redirige a 443 (HTTPS) |
-| 443 | Nginx HTTPS | Produccion | SSL con Let's Encrypt |
-| 8000 | Backend directo | Produccion | Accesible via nginx en /api/ |
-| 5050 | PGAdmin | Produccion | Solo si se activa profile "tools" |
-| 8080 | Nginx HTTP | Staging | Punto de entrada principal staging |
-| 8443 | (reservado) | Staging | Para futuro SSL en staging |
-| 8001 | Backend directo | Staging | Accesible via nginx en /api/ |
-| 6060 | PGAdmin | Staging | Solo si se activa profile "tools" |
+| Puerto | Servicio | Entorno |
+|--------|----------|---------|
+| 80 | Nginx HTTP | Produccion (redirige a 443) |
+| 443 | Nginx HTTPS | Produccion (SSL) |
+| 8000 | Backend | Produccion |
+| 5050 | PGAdmin | Produccion (si se activa) |
+| 8080 | Nginx HTTP | Staging |
+| 8001 | Backend | Staging |
+| 6060 | PGAdmin | Staging (si se activa) |
 
-### Puertos internos (no expuestos al exterior)
+### Puertos internos (no expuestos)
 
-| Puerto | Servicio | Notas |
-|--------|----------|-------|
-| 5432 | PostgreSQL | Solo accesible dentro de la red Docker |
-| 6379 | Redis | Solo accesible dentro de la red Docker |
+| Puerto | Servicio |
+|--------|----------|
+| 5432 | PostgreSQL (solo dentro de la red Docker) |
+| 6379 | Redis (solo dentro de la red Docker) |
 
 ---
 
@@ -1204,37 +943,45 @@ Usa esta lista para verificar que todo esta configurado correctamente.
 
 ```
 /root/
-├── app/                          ← PRODUCCION
-│   ├── compose.yaml              ← Mismo archivo en ambos
-│   ├── .env                      ← blitz-prod, :latest, port 80
-│   └── nginx/
-│       └── default.conf          ← Con SSL (Let's Encrypt)
+├── app/                              ← PRODUCCION
+│   ├── backend/
+│   │   └── squapup-...json           ← Firebase credentials (manual)
+│   ├── frontend/                     ← (para futuros secrets)
+│   └── infra/
+│       ├── compose.yaml              ← Archivo parametrizado
+│       ├── .env                      ← blitz-prod, :latest, port 80
+│       └── nginx/
+│           └── default.conf          ← Con SSL (Let's Encrypt)
 │
-└── app-dev/                      ← STAGING
-    ├── compose.yaml              ← Mismo archivo en ambos
-    ├── .env                      ← blitz-dev, :dev, port 8080
-    └── nginx/
-        └── default.conf          ← Sin SSL (HTTP simple)
+└── app-dev/                          ← STAGING
+    ├── backend/
+    │   └── squapup-...json           ← Copia del Firebase JSON
+    ├── frontend/                     ← (para futuros secrets)
+    └── infra/
+        ├── compose.yaml              ← Mismo archivo parametrizado
+        ├── .env                      ← blitz-dev, :dev, port 8080
+        └── nginx/
+            └── default.conf          ← Sin SSL (HTTP simple)
 ```
 
 ```
-Docker resources en el servidor:
+Contenedores Docker en el servidor:
 
-Contenedores:
-  blitz-prod-nginx-1          blitz-dev-nginx-1
-  blitz-prod-backend-1        blitz-dev-backend-1
-  blitz-prod-frontend-1       blitz-dev-frontend-1
-  blitz-prod-db-1             blitz-dev-db-1
-  blitz-prod-redis-1          blitz-dev-redis-1
-  blitz-prod-certbot-1        (no certbot en staging)
+Produccion (blitz-prod):              Staging (blitz-dev):
+├── blitz-prod-nginx-1                ├── blitz-dev-nginx-1
+├── blitz-prod-backend-1              ├── blitz-dev-backend-1
+├── blitz-prod-frontend-1             ├── blitz-dev-frontend-1
+├── blitz-prod-db-1                   ├── blitz-dev-db-1
+├── blitz-prod-redis-1                ├── blitz-dev-redis-1
+└── blitz-prod-certbot-1              └── (sin certbot)
 
 Volumenes (datos separados):
-  blitz-prod_postgres_data    blitz-dev_postgres_data
-  blitz-prod_redis_data       blitz-dev_redis_data
-  blitz-prod_frontend_dist    blitz-dev_frontend_dist
-  blitz-prod_certbot_conf     blitz-dev_certbot_conf
-  blitz-prod_certbot_www      blitz-dev_certbot_www
+├── blitz-prod_postgres_data          ├── blitz-dev_postgres_data
+├── blitz-prod_redis_data             ├── blitz-dev_redis_data
+└── blitz-prod_frontend_dist          └── blitz-dev_frontend_dist
 
-Redes (aisladas):
-  blitz-prod_blitz-net        blitz-dev_blitz-net
+Ruta INTERNA del contenedor (igual en ambos):
+└── /app/core/                        └── /app/core/
+    ├── manage.py                         ├── manage.py
+    └── squapup-...json (mount)           └── squapup-...json (mount)
 ```
