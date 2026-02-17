@@ -165,6 +165,58 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  #  PROMETHEUS — Recoleccion de metricas
+  #  Scrapea /metrics del backend (django-prometheus)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - blitz-net
+
+  # ---------------------------------------------------------------------------
+  #  LOKI — Agregacion de logs
+  # ---------------------------------------------------------------------------
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+    networks:
+      - blitz-net
+
+  # ---------------------------------------------------------------------------
+  #  GRAFANA — Dashboards y visualizacion
+  #  Datasources (Prometheus + Loki) se auto-provisionan
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+    networks:
+      - blitz-net
+
+  # ---------------------------------------------------------------------------
   #  PGADMIN — Administracion de BD (desactivar en produccion real)
   # ---------------------------------------------------------------------------
   pgadmin:
@@ -195,6 +247,9 @@ volumes:
   certbot_conf:
   certbot_www:
   pgadmin_data:
+  prometheus_data:
+  loki_data:
+  grafana_data:
 
 networks:
   blitz-net:
