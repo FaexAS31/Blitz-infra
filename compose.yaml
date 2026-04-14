@@ -219,6 +219,37 @@ services:
       - blitz-net
 
   # ---------------------------------------------------------------------------
+  #  CRON — Tareas periodicas (expire_solo_matches cada 5 min)
+  #  Usa la misma imagen del backend; solo cambia el CMD.
+  # ---------------------------------------------------------------------------
+  cron:
+    image: ghcr.io/jesuslab135/blitz-backend:${IMAGE_TAG:-latest}
+    command: >
+      /bin/sh -c "while true; do
+        python manage.py expire_solo_matches;
+        sleep 300;
+      done"
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      SECRET_KEY: ${SECRET_KEY}
+      HOST: db
+      PORT: "5432"
+      REDIS_HOST: redis
+      FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH}
+    volumes:
+      - ../backend/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json:/app/core/squapup-3ab7a-firebase-adminsdk-fbsvc-53c50f45a0.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - blitz-net
+
+  # ---------------------------------------------------------------------------
   #  PGADMIN — Administracion de BD (desactivar en produccion real)
   # ---------------------------------------------------------------------------
   pgadmin:
