@@ -111,7 +111,7 @@ services:
     #   dockerfile: Dockerfile
 
     # --- DEPLOY: imagen pre-construida en GHCR ---
-    image: ghcr.io/jesuslab135/blitz-frontend:${IMAGE_TAG:-latest}
+    image: ghcr.io/faexas31/blitz-frontend:${IMAGE_TAG:-latest}
 
     # Comparte dist/ con nginx via volumen
     volumes:
